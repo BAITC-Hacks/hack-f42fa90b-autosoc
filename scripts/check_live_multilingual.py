@@ -1,4 +1,4 @@
-"""Opt-in six-turn live check for multilingual agent behavior; never prints secrets."""
+"""Opt-in eight-turn live check for multilingual agent behavior; never prints secrets."""
 
 import argparse
 import asyncio
@@ -54,6 +54,8 @@ CASES = [
     ("followup_date", "kk", "А если 10 октября?", "2026-10-10", 1_000_000),
     ("followup_budget", "en", "Снизим бюджет до 300 тысяч", "2026-10-10", 300_000),
     ("ambiguous_date", "ru", "Нужен ведущий на свадьбу в Алматы 07/10, бюджет 1 000 000 тенге", None, None),
+    ("budget_500k", "en", "MC for a wedding in Almaty on 2026-10-07, budget 500,000 KZT", "2026-10-07", 500_000),
+    ("year_2027", "en", "MC for a wedding in Almaty on 7 October 2027, budget 300 thousand KZT", None, None),
 ]
 
 
@@ -80,7 +82,10 @@ async def main() -> int:
             if label == "en":
                 followup_session = result.session_id
             if expected_date is None:
-                passed = result.status == "clarification" and result.match is None
+                passed = (
+                    result.status == "clarification" and result.match is None
+                    and (label != "year_2027" or result.parameters.date != "2026-10-07")
+                )
                 expected = None
             else:
                 expected_query = MatchRequest.model_validate({**BASE, "date": expected_date, "budget_kzt": expected_budget})
@@ -111,7 +116,7 @@ async def main() -> int:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--live", action="store_true", help="Explicitly allow up to twelve paid API calls")
+    parser.add_argument("--live", action="store_true", help="Explicitly allow up to sixteen paid API calls")
     args = parser.parse_args()
     if not args.live:
         parser.error("Pass --live to explicitly run paid API requests")

@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Any
 
 from openai import AsyncOpenAI
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.ai_explain import QuoteBatch, apply_fragment_choices, fragment_catalog
 from app.config import ExplanationSettings, get_settings
@@ -225,6 +225,26 @@ def _tool_call(response: Any) -> tuple[str, str, ToolArguments]:
     return name, call_id, ToolArguments.model_validate_json(raw)
 
 
+def _out_of_calendar_tool_date(error: ValidationError) -> bool:
+    """Recognize only a valid ISO date rejected by the known calendar bound."""
+    errors = error.errors()
+    if len(errors) != 1:
+        return False
+    for item in errors:
+        if tuple(item.get("loc", ())) != ("changes", "date"):
+            continue
+        raw = item.get("input")
+        if not isinstance(raw, str):
+            continue
+        try:
+            proposed = date.fromisoformat(raw)
+        except ValueError:
+            continue
+        if not CALENDAR_START <= proposed <= CALENDAR_END:
+            return True
+    return False
+
+
 _NUMBER_WORDS = {
     "один": 1, "одна": 1, "одного": 1, "одной": 1,
     "два": 2, "две": 2, "двух": 2, "три": 3, "трех": 3, "трёх": 3,
@@ -243,7 +263,7 @@ _WORD_NUMBER = "(?:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + 
 _QUANTITIES = re.compile(
     r"(?<![\w.,])(?:(?P<number>\d{1,3}(?:[ ,\u00a0]\d{3})+|\d+(?:[.,]\d+)?|"
     + _WORD_NUMBER + r"(?:\s+" + _WORD_NUMBER + r")*)\s*"
-    r"(?P<unit>тыс(?:яч[а-яё]*)?\.?|миллион[а-яё]*|млн\.?|million(?:s)?|"
+    r"(?P<unit>тыс(?:яч[а-яё]*)?\.?|миллион[а-яё]*|млн\.?|thousand(?:s)?|million(?:s)?|"
     r"мың|тенге|теңге[а-яәіңғүұқөһ]*|тг|kzt|₸|час[а-яё]*|сағат[а-яәіңғүұқөһ]*|"
     r"hours?|hrs?|ч)?"
     r"|(?P<implicit>полмиллиона|миллион(?:а)?))(?!\w)", re.IGNORECASE,
@@ -264,7 +284,7 @@ _MONTHS = {
     "қараша": 11, "желтоқсан": 12,
 }
 _DAY_MONTH = re.compile(r"(?<!\d)(\d{1,2})\s+([^\W\d_]+)(?:\s+(\d{4}))?", re.IGNORECASE)
-_MONTH_DAY = re.compile(r"\b([^\W\d_]+)\s+(\d{1,2})(?:,?\s+(\d{4}))?", re.IGNORECASE)
+_MONTH_DAY = re.compile(r"\b([^\W\d_]+)\s+(\d{1,2})(?!\d)(?:,?\s+(\d{4}))?", re.IGNORECASE)
 _NUMERIC_DATE = re.compile(r"(?<!\d)(\d{1,2})[./-](\d{1,2})(?:[./-](\d{4}))?(?!\d)")
 _ISO_DATE = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
 _AMBIGUOUS_SLASH_DATE = re.compile(r"(?<!\d)(\d{1,2})/(\d{1,2})(?:/(\d{4}))?(?!\d)")
@@ -275,31 +295,56 @@ def _same_catalog_value(value: str, evidence: str, field: str = "category") -> b
     return supports_catalog_value(field, value, evidence)
 
 
-def _same_date(value: str, evidence: str) -> bool:
+def _same_date(value: str, evidence: str, message: str | None = None) -> bool:
     expected = date.fromisoformat(value)
-    if any(match.group() == value for match in _ISO_DATE.finditer(evidence)):
-        return True
-    for match in _NUMERIC_DATE.finditer(evidence):
+    context = message or evidence
+    spans = [(match.start(), match.end()) for match in re.finditer(re.escape(evidence), context, re.IGNORECASE)]
+    if not spans:
+        return False
+    years = {int(year) for year in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", context)}
+    candidates: list[date] = []
+    iso_spans: list[tuple[int, int]] = []
+
+    def cited(match: re.Match[str]) -> bool:
+        return any(start < match.end() and end > match.start() for start, end in spans)
+
+    def remember(year: int | None, month: int, day: int) -> None:
+        if year is None and years and years != {expected.year}:
+            # A year outside the cited fragment must not silently become 2026.
+            return
+        try:
+            candidates.append(date(year or 2026, month, day))
+        except ValueError:
+            pass
+
+    for match in _ISO_DATE.finditer(context):
+        iso_spans.append((match.start(), match.end()))
+        if cited(match):
+            candidates.append(date.fromisoformat(match.group()))
+    for match in _NUMERIC_DATE.finditer(context):
+        if any(start < match.end() and end > match.start() for start, end in iso_spans):
+            continue
+        if not cited(match):
+            continue
         day, month, year = match.groups()
         if match.group().count("/") and int(day) <= 12 and int(month) <= 12:
             continue
-        if (int(year or 2026), int(month), int(day)) == (expected.year, expected.month, expected.day):
-            return True
-    for match in _DAY_MONTH.finditer(evidence.casefold()):
+        remember(int(year) if year else None, int(month), int(day))
+    for match in _DAY_MONTH.finditer(context.casefold()):
+        if not cited(match):
+            continue
         day, month_word, year = match.groups()
         month = next((number for stem, number in _MONTHS.items() if month_word.startswith(stem)), None)
-        if month is not None and (int(year or 2026), month, int(day)) == (
-            expected.year, expected.month, expected.day
-        ):
-            return True
-    for match in _MONTH_DAY.finditer(evidence.casefold()):
+        if month is not None:
+            remember(int(year) if year else None, month, int(day))
+    for match in _MONTH_DAY.finditer(context.casefold()):
+        if not cited(match):
+            continue
         month_word, day, year = match.groups()
         month = next((number for stem, number in _MONTHS.items() if month_word.startswith(stem)), None)
-        if month is not None and (int(year or 2026), month, int(day)) == (
-            expected.year, expected.month, expected.day
-        ):
-            return True
-    return False
+        if month is not None:
+            remember(int(year) if year else None, month, int(day))
+    return bool(candidates) and all(candidate == expected for candidate in candidates)
 
 
 def _ambiguous_date(message: str) -> str | None:
@@ -335,13 +380,16 @@ def _same_number(
         raw, unit = quantity.group("number"), quantity.group("unit") or ""
         if raw[0].isdigit():
             compact = raw.replace(" ", "").replace("\u00a0", "")
-            number = Decimal(compact.replace(",", "") if compact.count(",") > 1 else compact.replace(",", "."))
+            # A comma followed by a three-digit group is a thousands separator;
+            # a shorter fractional group remains a decimal (for example 1,5).
+            grouped = re.fullmatch(r"\d{1,3}(?:,\d{3})+", compact)
+            number = Decimal(compact.replace(",", "") if grouped else compact.replace(",", "."))
         else:
             number = sum(Decimal(_NUMBER_WORDS[word]) for word in raw.split())
-        if unit.startswith(("тыс", "миллион", "млн", "million", "мың")):
+        if unit.startswith(("тыс", "thousand", "миллион", "млн", "million", "мың")):
             if not budget:
                 continue
-            number *= 1_000 if unit.startswith(("тыс", "мың")) else 1_000_000
+            number *= 1_000 if unit.startswith(("тыс", "thousand", "мың")) else 1_000_000
         elif unit.startswith(("тенге", "теңге")) or unit in {"тг", "₸", "kzt"}:
             if not budget:
                 continue
@@ -372,7 +420,7 @@ def _grounded_changes(
             continue
         valid = (
             _same_catalog_value(value, span, name) if name in {"city", "category", "event_format", "language"}
-            else _same_date(value, span) if name == "date"
+            else _same_date(value, span, message) if name == "date"
             else _same_number(
                 value, span, budget=name == "budget_kzt", message=message,
                 allow_bare=current is not None and next(
@@ -556,7 +604,17 @@ async def _run_with_client(
         parallel_tool_calls=False, max_output_tokens=900, store=False,
         **_model_options(settings.model),
     )
-    tool_name, call_id, arguments = _tool_call(first)
+    try:
+        tool_name, call_id, arguments = _tool_call(first)
+    except ValidationError as error:
+        if not _out_of_calendar_tool_date(error):
+            raise
+        message = {
+            "ru": "Календарь доступности охватывает 23.09–31.12.2026. Укажите дату в этом диапазоне.",
+            "kk": "Қолжетімділік күнтізбесі 23.09–31.12.2026 аралығын қамтиды. Осы аралықтағы күнді көрсетіңіз.",
+            "en": "The availability calendar covers 23 Sep–31 Dec 2026. Please choose a date in that range.",
+        }[locale]
+        return _finish(session, payload, status="clarification", source="template", message=message)
     progress.tool_name = tool_name
     grounded, evidence_issue, normalizations = _grounded_changes(
         payload.message, arguments.changes, arguments.evidence, session.parameters, locale,

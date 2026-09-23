@@ -53,6 +53,8 @@ _RU_ENDINGS = (
     "ого", "его", "ому", "ему", "ыми", "ими", "ий", "ый", "ой", "ая", "яя",
     "ое", "ее", "ые", "ие", "ия", "ью", "ей", "у", "а", "я", "ы", "и", "е", "ь",
 )
+_KAZAKH_CITY_SUFFIXES = {"да", "дағы", "дан", "ға", "ның", "мен"}
+_ASTANA_RUSSIAN_FORMS = {"астане", "астану", "астаной", "астаны"}
 
 
 def words(value: str) -> tuple[str, ...]:
@@ -94,7 +96,9 @@ def _word_cost(alias: str, cited: str) -> int | None:
         return 0
     if alias == "той" and cited.startswith("той"):
         return 0
-    if alias == "алматы" and cited.startswith("алматы"):
+    if alias in {"алматы", "астана"} and cited.startswith(alias) and cited[len(alias):] in _KAZAKH_CITY_SUFFIXES:
+        return 0
+    if alias == "астана" and cited in _ASTANA_RUSSIAN_FORMS:
         return 0
     if _distance_one(alias, cited):
         return 1

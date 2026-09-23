@@ -651,3 +651,133 @@ def test_english_input_with_kazakh_ui_keeps_service_language_unset(profiles):
 ])
 def test_catalog_evidence_tolerates_case_and_extra_spaces(canonical, fragment, field):
     assert agent._same_catalog_value(canonical, fragment, field)
+
+
+@pytest.mark.parametrize("amount, correct, wrong, clipped", [
+    ("500,000 KZT", 500_000, 500, "500"),
+    ("300,000 KZT", 300_000, 300, "300"),
+    ("300 thousand KZT", 300_000, 300, "300"),
+    ("1.5 million KZT", 1_500_000, 1_000_000, "million"),
+    ("1,5 млн тенге", 1_500_000, 5_000_000, "5 млн"),
+    ("300 мың теңге", 300_000, 300, "300"),
+    ("1 000 000 ₸", 1_000_000, 1_000, "1 000"),
+    ("1,000,000 KZT", 1_000_000, 1_000, "1,000"),
+])
+def test_entire_budget_quantity_is_grounded(amount, correct, wrong, clipped):
+    message = f"Budget {amount}"
+    assert agent._same_number(correct, amount, budget=True, message=message)
+    assert not agent._same_number(wrong, clipped, budget=True, message=message)
+
+
+@pytest.mark.parametrize("amount, correct, wrong, clipped", [
+    ("500,000 KZT", 500_000, 500, "500"),
+    ("300 thousand KZT", 300_000, 300, "300"),
+])
+def test_english_amount_cannot_be_truncated_in_agent_turn(profiles, amount, correct, wrong, clipped):
+    message = f"MC for a wedding in Almaty on 2026-10-07, budget {amount}"
+    evidence = {
+        "city": "Almaty", "category": "MC", "event_format": "wedding",
+        "date": "2026-10-07", "budget_kzt": amount,
+    }
+    right = turn(message, profiles, AgentSessionStore(), FakeResponses(tool(
+        evidence=evidence, **(COMPLETE | {"budget_kzt": correct}),
+    )))
+    assert right.status == "matched"
+    assert right.parameters.budget_kzt == correct
+
+    wrong_client = FakeResponses(tool(
+        evidence=evidence | {"budget_kzt": clipped},
+        **(COMPLETE | {"budget_kzt": wrong}),
+    ))
+    rejected = turn(message, profiles, AgentSessionStore(), wrong_client)
+    assert rejected.status == "clarification"
+    assert rejected.parameters.budget_kzt is None
+    assert rejected.match is None
+    assert wrong_client.parse_calls == []
+
+
+@pytest.mark.parametrize("message, fragment, valid", [
+    ("Мероприятие 7 октября 2027 года", "7 октября", False),
+    ("2027 жылғы 7 қазанда іс-шара", "7 қазанда", False),
+    ("Event 7 October 2027", "7 October", False),
+    ("Мероприятие 7 октября 2026 года", "7 октября", True),
+    ("2026 жылғы 7 қазанда іс-шара", "7 қазанда", True),
+    ("Event 7 October 2026", "7 October", True),
+])
+def test_explicit_year_survives_truncated_date_evidence(message, fragment, valid):
+    assert agent._same_date("2026-10-07", fragment, message) is valid
+
+
+@pytest.mark.parametrize("locale, message, fragment", [
+    ("ru", "Мероприятие 7 октября 2027 года", "7 октября"),
+    ("kk", "2027 жылғы 7 қазанда іс-шара", "7 қазанда"),
+    ("en", "Event 7 October 2027", "7 October"),
+])
+def test_explicit_2027_cannot_be_rewritten_as_2026(locale, message, fragment, profiles):
+    client = FakeResponses(tool(evidence={"date": fragment}, date="2026-10-07"))
+    result = asyncio.run(agent_turn(
+        AgentTurnRequest(message=message), profiles, AgentSessionStore(),
+        settings=SETTINGS, client=client, locale=locale,
+    ))
+    assert result.status == "clarification"
+    assert result.parameters.date is None
+    assert result.match is None
+    assert client.parse_calls == []
+
+
+@pytest.mark.parametrize("locale, message", [
+    ("ru", "Нужен ведущий на свадьбу в Алматы 7 октября 2027, бюджет 300000 тенге"),
+    ("kk", "Алматыда 2027 жылғы 7 қазанда үйлену тойына жүргізуші керек, бюджет 300000 теңге"),
+    ("en", "MC for a wedding in Almaty on 7 October 2027, budget 300 thousand KZT"),
+])
+def test_model_proposed_out_of_calendar_year_gets_clear_clarification(locale, message, profiles):
+    client = FakeResponses(tool(evidence={"date": "7 October 2027"}, date="2027-10-07"))
+    result = asyncio.run(agent_turn(
+        AgentTurnRequest(message=message), profiles, AgentSessionStore(),
+        settings=SETTINGS, client=client, locale=locale,
+    ))
+    assert result.status == "clarification"
+    assert result.source == "template"
+    assert "2026" in result.message
+    assert result.parameters.date is None
+    assert result.match is None
+    assert client.parse_calls == []
+
+
+def test_other_invalid_tool_arguments_remain_errors(profiles):
+    client = FakeResponses(tool(evidence={"budget_kzt": "-1"}, budget_kzt=-1))
+    result = turn("Бюджет -1", profiles, AgentSessionStore(), client)
+    assert result.status == "error"
+    assert result.match is None
+
+
+@pytest.mark.parametrize("fragment, expected", [
+    ("Астанада", True),
+    ("Астанадағы", True),
+    ("Астанаға", True),
+    ("Алматыда", True),
+    ("Алматыдағы", True),
+    ("Астаналық", False),
+    ("Астанадай", False),
+])
+def test_kazakh_city_forms_are_bounded(fragment, expected):
+    canonical = "Алматы" if fragment.startswith("Алматы") else "Астана"
+    assert agent._same_catalog_value(canonical, fragment, "city") is expected
+
+
+def test_florist_in_astana_with_kazakh_city_form(profiles):
+    catalog = (*profiles, profile("floral", category="Флорист", city="Астана"))
+    message = "Астанадағы 2026-10-07 күнгі үйлену тойына флорист керек. Бюджет 500 000 теңге"
+    client = FakeResponses(tool(evidence={
+        "city": "Астанадағы", "date": "2026-10-07",
+        "event_format": "үйлену тойына", "category": "флорист",
+        "budget_kzt": "500 000 теңге",
+    }, city="Астана", date="2026-10-07", event_format="свадьба",
+        category="Флорист", budget_kzt=500_000))
+    result = asyncio.run(agent_turn(
+        AgentTurnRequest(message=message), catalog, AgentSessionStore(),
+        settings=SETTINGS, client=client, locale="kk",
+    ))
+    assert result.status == "matched"
+    assert result.parameters.city == "Астана"
+    assert [card.id for card in result.match.cards] == ["floral"]
