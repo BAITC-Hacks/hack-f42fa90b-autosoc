@@ -155,6 +155,41 @@ function precise(key, values = {}) {
   return precisionUi[locale][key].replace(/\{(\w+)\}/g, (_match, name) => String(values[name] ?? ""));
 }
 
+const dateCompareUi = {
+  ru: {
+    title: "Сравнить две даты", intro: "Остальные условия остаются теми же. Сравниваем все подходящие ID, а не позиции трёх карточек.",
+    secondDate: "Вторая дата", run: "Сравнить даты", running: "Проверяем обе даты…",
+    sameDate: "Выберите другую дату.", invalidDate: "Выберите дату в пределах календаря.", failed: "Сравнение не удалось. Повторите запрос.",
+    summary: "{first}: {firstCount} подходят · {second}: {secondCount} подходят.", profile: "Профиль {id}",
+    eligibleShown: "Подходит · показан в карточках", eligibleHidden: "Подходит · за пределами первых трёх карточек",
+    excluded: "Отсеян: {reasons}", unknown: "Причина отсутствует в ответе сервера", empty: "На обе даты подходящих профилей нет.",
+    note: "Причины берутся из ответа для каждой даты. Один профиль может не пройти сразу по нескольким условиям. Сравнение работает без AI.",
+  },
+  kk: {
+    title: "Екі күнді салыстыру", intro: "Қалған шарттар өзгермейді. Үш карточкадағы орындарды емес, барлық сәйкес ID-ді салыстырамыз.",
+    secondDate: "Екінші күн", run: "Күндерді салыстыру", running: "Екі күн тексерілуде…",
+    sameDate: "Басқа күнді таңдаңыз.", invalidDate: "Күнтізбе шегіндегі күнді таңдаңыз.", failed: "Салыстыру орындалмады. Қайталап көріңіз.",
+    summary: "{first}: {firstCount} сәйкес · {second}: {secondCount} сәйкес.", profile: "{id} профилі",
+    eligibleShown: "Сәйкес · карточкада көрсетілген", eligibleHidden: "Сәйкес · алғашқы үш карточкадан тыс",
+    excluded: "Шығарылды: {reasons}", unknown: "Себеп сервер жауабында жоқ", empty: "Екі күнде де сәйкес профиль жоқ.",
+    note: "Себептер әр күннің жауабынан алынады. Бір профиль бірнеше шартқа сәйкес келмеуі мүмкін. Салыстыру AI-сыз жұмыс істейді.",
+  },
+  en: {
+    title: "Compare two dates", intro: "Other requirements stay the same. This compares every eligible ID, not card positions.",
+    secondDate: "Second date", run: "Compare dates", running: "Checking both dates…",
+    sameDate: "Choose a different date.", invalidDate: "Choose a date within the calendar.", failed: "Comparison failed. Please retry.",
+    summary: "{first}: {firstCount} eligible · {second}: {secondCount} eligible.", profile: "Profile {id}",
+    eligibleShown: "Eligible · shown in cards", eligibleHidden: "Eligible · outside the first three cards",
+    excluded: "Excluded: {reasons}", unknown: "No reason in the server response", empty: "No eligible profiles on either date.",
+    note: "Reasons come from each date's response. A profile can fail several conditions. Comparison works without AI.",
+  },
+};
+
+function dc(key, values = {}) {
+  const template = dateCompareUi[locale][key];
+  return template.replace(/\{(\w+)\}/g, (_match, name) => String(values[name] ?? ""));
+}
+
 const scenarios = {
   choice: { city: "Алматы", date: "2026-10-07", event_format: "свадьба", category: "Ведущий", budget_kzt: 1000000 },
   rare: { city: "Астана", date: "2026-09-23", event_format: "свадьба", category: "Флорист", budget_kzt: 300000 },
@@ -175,6 +210,8 @@ const fieldLabels = {
 let optionsLoaded = false;
 let activeController = null;
 let requestGeneration = 0;
+let comparisonController = null;
+let dateComparison = null;
 let agentSessionId = null;
 let agentController = null;
 let agentGeneration = 0;
@@ -386,6 +423,9 @@ function stopPreviousRequest() {
   requestGeneration += 1;
   if (activeController) activeController.abort();
   activeController = null;
+  if (comparisonController) comparisonController.abort();
+  comparisonController = null;
+  dateComparison = null;
   setBusy(false);
 }
 
@@ -726,6 +766,134 @@ function renderNearby(dates, query, target, outcome) {
   return section;
 }
 
+function comparisonStatus(response, id, query, responseLocale) {
+  if (response.matched_ids.includes(id)) {
+    return dc(response.cards.some((card) => card.id === id) ? "eligibleShown" : "eligibleHidden");
+  }
+  const rejection = response.rejected.find((item) => item.id === id);
+  if (!rejection) return dc("unknown");
+  const reasons = rejection.all_reasons.map((reason) =>
+    `${t(reasonLabels[reason.code] || reason.code)}: ${localizedRejectionDetail(reason, query, responseLocale)}`);
+  return dc("excluded", { reasons: reasons.join("; ") });
+}
+
+function renderDateComparisonOutput(output, query, state) {
+  if (!state?.first || !state.second) return;
+  const first = state.first;
+  const second = state.second;
+  const firstDate = dateLabel(query.date);
+  const secondDate = dateLabel(state.secondDate);
+  const ids = [...new Set([...first.matched_ids, ...second.matched_ids])];
+  output.replaceChildren(element("p", "date-compare-summary", dc("summary", {
+    first: firstDate, firstCount: first.total_matches,
+    second: secondDate, secondCount: second.total_matches,
+  })));
+  if (!ids.length) output.append(element("p", "", dc("empty")));
+  const rows = element("div", "date-compare-rows");
+  for (const id of ids) {
+    const profile = [...first.cards, ...second.cards, ...first.rejected, ...second.rejected].find((item) => item.id === id);
+    const row = element("div", "date-compare-row");
+    row.append(element("strong", "", `${dc("profile", { id })}${profile?.anon_name ? ` · ${profile.anon_name}` : ""}`));
+    const firstCell = element("p", "", comparisonStatus(first, id, query, state.responseLocale));
+    firstCell.prepend(element("b", "", `${firstDate}: `));
+    const secondCell = element("p", "", comparisonStatus(second, id, { ...query, date: state.secondDate }, state.responseLocale));
+    secondCell.prepend(element("b", "", `${secondDate}: `));
+    row.append(firstCell, secondCell);
+    rows.append(row);
+  }
+  output.append(rows, element("p", "date-compare-note", dc("note")));
+}
+
+function renderDateCompare(query) {
+  const section = element("section", "date-compare");
+  section.append(element("h3", "", dc("title")), element("p", "date-compare-intro", dc("intro")));
+  const controls = element("div", "date-compare-controls");
+  const label = element("label", "", dc("secondDate"));
+  const input = element("input", "");
+  input.type = "date";
+  input.required = true;
+  input.min = optionsData.calendar_start;
+  input.max = optionsData.calendar_end;
+  input.value = dateComparison?.baseKey === JSON.stringify(query) ? dateComparison.secondDate : "";
+  label.append(input);
+  const button = element("button", "date-compare-button", dc("run"));
+  button.type = "button";
+  const status = element("p", "date-compare-status");
+  status.setAttribute("role", "status");
+  if (comparisonController && dateComparison?.baseKey === JSON.stringify(query)) {
+    button.disabled = true;
+    status.textContent = dc("running");
+  }
+  const output = element("div", "date-compare-output");
+  input.addEventListener("input", () => {
+    input.setCustomValidity("");
+    if (comparisonController) comparisonController.abort();
+    comparisonController = null;
+    button.disabled = false;
+    status.textContent = "";
+    if (dateComparison?.baseKey === JSON.stringify(query)) {
+      dateComparison.secondDate = input.value;
+      dateComparison.first = null;
+      dateComparison.second = null;
+    }
+    output.replaceChildren();
+  });
+  button.addEventListener("click", async () => {
+    if (!input.checkValidity()) { input.reportValidity(); return; }
+    if (input.value === query.date) { input.setCustomValidity(dc("sameDate")); input.reportValidity(); return; }
+    if (input.value < optionsData.calendar_start || input.value > optionsData.calendar_end) {
+      input.setCustomValidity(dc("invalidDate")); input.reportValidity(); return;
+    }
+    if (comparisonController) comparisonController.abort();
+    const controller = new AbortController();
+    comparisonController = controller;
+    const generation = requestGeneration;
+    const secondDate = input.value;
+    const responseLocale = locale;
+    dateComparison = { baseKey: JSON.stringify(query), secondDate, first: null, second: null, responseLocale };
+    button.disabled = true;
+    status.textContent = dc("running");
+    output.replaceChildren();
+    try {
+      const send = async (date) => {
+        const response = await fetch("/api/match?explain=template", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json", "Accept-Language": responseLocale },
+          body: JSON.stringify({ ...query, date }), signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const body = await response.json();
+        if (!Array.isArray(body.matched_ids) || !Array.isArray(body.cards) || !Array.isArray(body.rejected) ||
+            body.matched_ids.length !== body.total_matches) throw new Error("Invalid match response");
+        return body;
+      };
+      const [first, second] = await Promise.all([send(query.date), send(secondDate)]);
+      if (generation !== requestGeneration || controller.signal.aborted) return;
+      dateComparison = { baseKey: JSON.stringify(query), secondDate, first, second, responseLocale };
+      const current = resultsElement.querySelector(".date-compare");
+      if (current) {
+        current.querySelector(".date-compare-status").textContent = "";
+        renderDateComparisonOutput(current.querySelector(".date-compare-output"), query, dateComparison);
+      }
+    } catch (error) {
+      if (generation !== requestGeneration || error.name === "AbortError") return;
+      const current = resultsElement.querySelector(".date-compare");
+      if (current) current.querySelector(".date-compare-status").textContent = dc("failed");
+    } finally {
+      if (comparisonController === controller) {
+        comparisonController = null;
+        if (section.isConnected) button.disabled = false;
+        const current = resultsElement.querySelector(".date-compare");
+        if (current) current.querySelector(".date-compare-button").disabled = false;
+      }
+    }
+  });
+  controls.append(label, button);
+  section.append(controls, status, output);
+  if (dateComparison?.baseKey === JSON.stringify(query)) renderDateComparisonOutput(output, query, dateComparison);
+  return section;
+}
+
 function renderResponse(response, target = resultsElement, query = null, responseLocale = locale, preserve = false) {
   if (!["matched", "no_category_in_city", "all_filtered"].includes(response.outcome) ||
       !Array.isArray(response.cards) || !Array.isArray(response.rejected)) {
@@ -740,6 +908,7 @@ function renderResponse(response, target = resultsElement, query = null, respons
   if (changes) content.push(changes);
   const nearby = renderNearby(response.nearby_dates, query, target, response.outcome);
   if (nearby) content.push(nearby);
+  if (target === resultsElement && query && optionsData) content.push(renderDateCompare(query));
   const comparison = renderComparison(response.cards.slice(0, 3));
   if (comparison) content.push(comparison);
   for (const [index, card] of response.cards.slice(0, 3).entries()) content.push(renderCard(card, index, responseLocale));

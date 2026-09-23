@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
@@ -60,10 +61,12 @@ def options(request: Request) -> OptionsResponse:
 
 
 @app.post("/api/match", response_model=MatchResponse)
-async def api_match(payload: MatchRequest, request: Request) -> MatchResponse:
+async def api_match(
+    payload: MatchRequest, request: Request, explain: Literal["auto", "template"] = "auto",
+) -> MatchResponse:
     profiles = _profiles(request)
     selected = match(profiles, payload)
-    enriched = await enrich_match(selected, profiles, payload)
+    enriched = selected if explain == "template" else await enrich_match(selected, profiles, payload)
     return localize_match(enriched, profiles, payload, normalize_locale(request.headers.get("accept-language")))
 
 

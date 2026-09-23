@@ -118,7 +118,7 @@ def _match_core(profiles: tuple[Profile, ...], request: MatchRequest) -> MatchRe
             message += f" Карточек меньше трёх: всего кандидатов {len(candidates)}, не прошли условия {len(rejected)}."
         outcome = "matched"
     return MatchResponse(
-        outcome=outcome, total_matches=len(matched), cards=cards,
+        outcome=outcome, total_matches=len(matched), matched_ids=[profile.id for profile in matched], cards=cards,
         primary_reason_counts=reason_counts, rejected=rejected,
         excluded_by_date=reason_counts["date"], message=message,
         funnel=_funnel(profiles, request, reason_counts),

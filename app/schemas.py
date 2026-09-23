@@ -129,6 +129,7 @@ class NearbyDate(BaseModel):
 class MatchResponse(BaseModel):
     outcome: Literal["matched", "no_category_in_city", "all_filtered"]
     total_matches: int
+    matched_ids: list[str] = Field(default_factory=list)
     cards: list[MatchCard]
     primary_reason_counts: dict[str, int]
     rejected: list[Rejection]

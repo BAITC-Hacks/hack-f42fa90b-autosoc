@@ -34,6 +34,12 @@ def test_russian_kazakh_english_dictionaries_have_the_same_keys() -> None:
     en = set(KEY.findall(precision.split("  en: {", 1)[1]))
     assert ru and ru == kk == en
 
+    comparison = SCRIPT.split("const dateCompareUi = {", 1)[1].split("\n};\n\nfunction dc", 1)[0]
+    ru = set(KEY.findall(comparison.split("  ru: {", 1)[1].split("  kk: {", 1)[0]))
+    kk = set(KEY.findall(comparison.split("  kk: {", 1)[1].split("  en: {", 1)[0]))
+    en = set(KEY.findall(comparison.split("  en: {", 1)[1]))
+    assert ru and ru == kk == en
+
 
 def test_html_and_client_text_keys_exist_in_each_locale() -> None:
     required = set(re.findall(r'data-i18n(?:-placeholder|-aria-label)?="([A-Za-z][A-Za-z0-9]*)"', PAGE))
