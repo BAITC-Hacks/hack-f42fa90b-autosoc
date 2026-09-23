@@ -622,3 +622,32 @@ def test_localized_clarification_does_not_turn_ui_language_into_service_filter(p
     assert result.message.startswith("Which contractor category")
     assert result.parameters.language is None
     assert result.normalizations == [{"field": "city", "input": "Almaty", "canonical": "Алматы"}]
+
+
+def test_english_input_with_kazakh_ui_keeps_service_language_unset(profiles):
+    message = "Find an MC for a weddding in Almaty on 2026-10-07. My maximum budget is 1,000,000 KZT"
+    evidence = {
+        "city": "Almaty", "category": "MC", "event_format": "weddding",
+        "date": "2026-10-07", "budget_kzt": "1,000,000 KZT",
+    }
+    client = FakeResponses(tool(evidence=evidence, **(COMPLETE | {"budget_kzt": 1_000_000})))
+    result = asyncio.run(agent_turn(
+        AgentTurnRequest(message=message), profiles, AgentSessionStore(),
+        settings=SETTINGS, client=client, locale="kk",
+    ))
+    assert result.status == "matched"
+    assert result.parameters.language is None
+    assert result.parameters.city == "Алматы"
+    assert result.parameters.category == "Ведущий"
+    assert result.parameters.event_format == "свадьба"
+    assert result.match.total_matches == direct(profiles, budget_kzt=1_000_000).total_matches
+    assert "профиль" in result.message
+
+
+@pytest.mark.parametrize("canonical, fragment, field", [
+    ("Алматы", "  aLmAtY  ", "city"),
+    ("Ведущий", "  EVENT   HSOT  ", "category"),
+    ("свадьба", "  WeDDDinG  ", "event_format"),
+])
+def test_catalog_evidence_tolerates_case_and_extra_spaces(canonical, fragment, field):
+    assert agent._same_catalog_value(canonical, fragment, field)

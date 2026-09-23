@@ -190,6 +190,22 @@ function dc(key, values = {}) {
   return template.replace(/\{(\w+)\}/g, (_match, name) => String(values[name] ?? ""));
 }
 
+Object.assign(ui.ru, {
+  budgetSuggestionTitle: "Вариант при другом бюджете",
+  budgetSuggestionIntro: "В каталоге есть профиль, проходящий остальные условия при цене «от» {price}. Понадобится увеличить бюджет на {increase}; итоговую смету нужно уточнить.",
+  budgetSuggestionAction: "Проверить с бюджетом {price}",
+});
+Object.assign(ui.kk, {
+  budgetSuggestionTitle: "Басқа бюджетпен нұсқа",
+  budgetSuggestionIntro: "Каталогта қалған шарттарға сай, бағасы {price} бастап болатын профиль бар. Бюджетті {increase} арттыру қажет; соңғы сметаны нақтылау керек.",
+  budgetSuggestionAction: "{price} бюджетімен тексеру",
+});
+Object.assign(ui.en, {
+  budgetSuggestionTitle: "Option with a different budget",
+  budgetSuggestionIntro: "A catalog profile meets the other requirements at a starting price of {price}. The budget would need to rise by {increase}; confirm the final quote separately.",
+  budgetSuggestionAction: "Check with a {price} budget",
+});
+
 const scenarios = {
   choice: { city: "Алматы", date: "2026-10-07", event_format: "свадьба", category: "Ведущий", budget_kzt: 1000000 },
   rare: { city: "Астана", date: "2026-09-23", event_format: "свадьба", category: "Флорист", budget_kzt: 300000 },
@@ -766,6 +782,30 @@ function renderNearby(dates, query, target, outcome) {
   return section;
 }
 
+function renderBudgetSuggestion(suggestion, query, target, outcome) {
+  if (outcome !== "all_filtered" || !suggestion || !query) return null;
+  const price = suggestion.price_from_kzt;
+  if (!Number.isInteger(price) || price <= query.budget_kzt ||
+      suggestion.increase_kzt !== price - query.budget_kzt) return null;
+  const section = element("section", "budget-suggestion");
+  section.append(element("h3", "", t("budgetSuggestionTitle")));
+  section.append(element("p", "", t("budgetSuggestionIntro", {
+    price: money(price), increase: money(suggestion.increase_kzt),
+  })));
+  const button = element("button", "nearby-button", t("budgetSuggestionAction", { price: money(price) }));
+  button.type = "button";
+  button.addEventListener("click", () => {
+    if (target === agentResults) setScenarioValues(query);
+    fields.budget.value = String(price);
+    requestMatch();
+    if (window.matchMedia("(max-width: 760px)").matches) {
+      document.querySelector(".results-column").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+  section.append(button);
+  return section;
+}
+
 function comparisonStatus(response, id, query, responseLocale) {
   if (response.matched_ids.includes(id)) {
     return dc(response.cards.some((card) => card.id === id) ? "eligibleShown" : "eligibleHidden");
@@ -908,6 +948,8 @@ function renderResponse(response, target = resultsElement, query = null, respons
   if (changes) content.push(changes);
   const nearby = renderNearby(response.nearby_dates, query, target, response.outcome);
   if (nearby) content.push(nearby);
+  const budgetSuggestion = renderBudgetSuggestion(response.budget_suggestion, query, target, response.outcome);
+  if (budgetSuggestion) content.push(budgetSuggestion);
   if (target === resultsElement && query && optionsData) content.push(renderDateCompare(query));
   const comparison = renderComparison(response.cards.slice(0, 3));
   if (comparison) content.push(comparison);

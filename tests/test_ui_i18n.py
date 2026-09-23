@@ -19,7 +19,11 @@ def _locale_keys(locale: str) -> set[str]:
         start = start.split("  kk: {", 1)[0]
     elif locale == "kk":
         start = start.split("  en: {", 1)[0]
-    return set(KEY.findall(start))
+    keys = set(KEY.findall(start))
+    extension = re.search(rf"Object\.assign\(ui\.{locale}, \{{(.*?)\n\}}\);", SCRIPT, re.S)
+    if extension:
+        keys.update(KEY.findall(extension.group(1)))
+    return keys
 
 
 def test_russian_kazakh_english_dictionaries_have_the_same_keys() -> None:

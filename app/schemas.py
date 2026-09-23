@@ -126,6 +126,13 @@ class NearbyDate(BaseModel):
     total_matches: int = Field(gt=0)
 
 
+class BudgetSuggestion(BaseModel):
+    """Minimum catalog starting price after all other requested checks pass."""
+
+    price_from_kzt: int = Field(gt=0)
+    increase_kzt: int = Field(gt=0)
+
+
 class MatchResponse(BaseModel):
     outcome: Literal["matched", "no_category_in_city", "all_filtered"]
     total_matches: int
@@ -137,6 +144,7 @@ class MatchResponse(BaseModel):
     message: str
     funnel: list[FunnelStep] = Field(default_factory=list)
     nearby_dates: list[NearbyDate] = Field(default_factory=list)
+    budget_suggestion: BudgetSuggestion | None = None
 
 
 class OptionsResponse(BaseModel):

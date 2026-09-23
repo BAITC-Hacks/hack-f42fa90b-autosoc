@@ -151,6 +151,9 @@ form { margin-top: 31px; }
 .nearby-button { min-height: 32px; padding: 5px 8px; border: 1px solid var(--accent); border-radius: 8px; color: var(--accent); background: white; font-size: 11px; font-weight: 700; cursor: pointer; }
 .nearby-button:hover { background: var(--accent-light); }
 .nearby-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.budget-suggestion { padding: 20px 23px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+.budget-suggestion h3 { margin: 0 0 12px; font-size: 16px; }
+.budget-suggestion p { margin: 0 0 13px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .date-compare { padding: 20px 23px; border: 1px solid #d9ddf9; border-radius: 16px; background: #f8f8ff; }
 .date-compare h3 { margin: 0 0 7px; font-size: 17px; }
 .date-compare-intro, .date-compare-note { margin: 0 0 14px; color: var(--muted); font-size: 12px; line-height: 1.5; }

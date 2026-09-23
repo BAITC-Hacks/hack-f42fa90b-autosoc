@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from app.explain import make_card
 from app.schemas import (
-    CALENDAR_END, CALENDAR_START, FunnelStep, MatchRequest, MatchResponse,
+    BudgetSuggestion, CALENDAR_END, CALENDAR_START, FunnelStep, MatchRequest, MatchResponse,
     NearbyDate, Profile, Rejection, RejectionReason,
 )
 
@@ -155,5 +155,26 @@ def match(profiles: Iterable[Profile], request: MatchRequest) -> MatchResponse:
     catalog = tuple(profiles)
     result = _match_core(catalog, request)
     if result.outcome == "all_filtered":
-        result = result.model_copy(update={"nearby_dates": _nearby_dates(catalog, request, result)})
+        # A price change may help only if budget is the sole rejection reason.
+        price_only_ids = {
+            rejection.id for rejection in result.rejected
+            if {reason.code for reason in rejection.all_reasons} == {"budget"}
+        }
+        prices = [
+            profile.price_from_kzt for profile in catalog
+            if profile.id in price_only_ids and profile.price_from_kzt is not None
+        ]
+        suggestion = None
+        if prices:
+            minimum = min(prices)
+            # Check the proposed value through the ordinary matching rules once.
+            changed = request.model_copy(update={"budget_kzt": minimum})
+            if _match_core(catalog, changed).total_matches:
+                suggestion = BudgetSuggestion(
+                    price_from_kzt=minimum, increase_kzt=minimum - request.budget_kzt,
+                )
+        result = result.model_copy(update={
+            "nearby_dates": _nearby_dates(catalog, request, result),
+            "budget_suggestion": suggestion,
+        })
     return result
