@@ -2,9 +2,13 @@
 
 from collections import Counter
 from collections.abc import Iterable
+from datetime import timedelta
 
 from app.explain import make_card
-from app.schemas import MatchRequest, MatchResponse, Profile, Rejection, RejectionReason
+from app.schemas import (
+    CALENDAR_END, CALENDAR_START, FunnelStep, MatchRequest, MatchResponse,
+    NearbyDate, Profile, Rejection, RejectionReason,
+)
 
 REASONS = ("date", "format", "budget", "language", "hours", "insufficient_data")
 REASON_LABELS = {
@@ -46,20 +50,47 @@ def _rejection(profile: Profile, request: MatchRequest) -> Rejection | None:
     if not reasons:
         return None
     primary = reasons[0]
-    return Rejection(id=profile.id, primary_reason=primary.code, detail=primary.detail, all_reasons=reasons)
+    return Rejection(
+        id=profile.id, anon_name=profile.anon_name,
+        primary_reason=primary.code, detail=primary.detail, all_reasons=reasons,
+    )
 
 
-def match(profiles: Iterable[Profile], request: MatchRequest) -> MatchResponse:
+def _funnel(profiles: tuple[Profile, ...], request: MatchRequest, counts: dict[str, int]) -> list[FunnelStep]:
+    city_count = sum(profile.city == request.city for profile in profiles)
+    category_count = sum(
+        profile.city == request.city and request.category in profile.categories for profile in profiles
+    )
+    steps = [
+        FunnelStep(step="catalog", count=len(profiles)),
+        FunnelStep(step="city", count=city_count),
+        FunnelStep(step="category", count=category_count),
+    ]
+    remaining = category_count
+    for reason in REASONS:
+        remaining -= counts[reason]
+        if reason == "insufficient_data" and counts[reason] == 0:
+            continue
+        steps.append(FunnelStep(
+            step=reason, count=remaining,
+            applied=reason not in ("language", "hours") or getattr(request, reason) is not None,
+        ))
+    return steps
+
+
+def _match_core(profiles: tuple[Profile, ...], request: MatchRequest) -> MatchResponse:
     candidates = sorted(
         (profile for profile in profiles if profile.city == request.city and request.category in profile.categories),
         key=lambda profile: profile.id,
     )
+    empty_counts = {reason: 0 for reason in REASONS}
     if not candidates:
         return MatchResponse(
             outcome="no_category_in_city", total_matches=0, cards=[],
-            primary_reason_counts={reason: 0 for reason in REASONS}, rejected=[],
+            primary_reason_counts=empty_counts, rejected=[],
             excluded_by_date=0,
             message=f"Категория «{request.category}» не представлена в городе {request.city}; календарь никого не исключил.",
+            funnel=_funnel(profiles, request, empty_counts),
         )
 
     matched = []
@@ -90,4 +121,39 @@ def match(profiles: Iterable[Profile], request: MatchRequest) -> MatchResponse:
         outcome=outcome, total_matches=len(matched), cards=cards,
         primary_reason_counts=reason_counts, rejected=rejected,
         excluded_by_date=reason_counts["date"], message=message,
+        funnel=_funnel(profiles, request, reason_counts),
     )
+
+
+def _nearby_dates(
+    profiles: tuple[Profile, ...], request: MatchRequest, response: MatchResponse,
+) -> list[NearbyDate]:
+    # Только профили, которые отсечены исключительно датой, могут появиться при её смене.
+    possible_ids = {
+        rejection.id for rejection in response.rejected
+        if {reason.code for reason in rejection.all_reasons} == {"date"}
+    }
+    if not possible_ids:
+        return []
+    possible = tuple(profile for profile in profiles if profile.id in possible_ids)
+    alternatives: list[NearbyDate] = []
+    for distance in range(1, 15):
+        for offset in (distance, -distance):  # при равном расстоянии будущая дата первая
+            candidate = request.date + timedelta(days=offset)
+            if not CALENDAR_START <= candidate <= CALENDAR_END:
+                continue
+            changed = request.model_copy(update={"date": candidate})
+            total = _match_core(possible, changed).total_matches
+            if total:
+                alternatives.append(NearbyDate(date=candidate, total_matches=total))
+                if len(alternatives) == 3:
+                    return alternatives
+    return alternatives
+
+
+def match(profiles: Iterable[Profile], request: MatchRequest) -> MatchResponse:
+    catalog = tuple(profiles)
+    result = _match_core(catalog, request)
+    if result.outcome == "all_filtered":
+        result = result.model_copy(update={"nearby_dates": _nearby_dates(catalog, request, result)})
+    return result

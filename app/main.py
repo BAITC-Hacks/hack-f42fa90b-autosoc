@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.agent import AgentSessionStore, agent_turn
 from app.ai_explain import enrich_match
 from app.data import load_profiles
+from app.i18n import localize_match, normalize_locale
 from app.matcher import match
 from app.schemas import (
     CALENDAR_END, CALENDAR_START, AgentTurnRequest, AgentTurnResponse,
@@ -62,9 +63,13 @@ def options(request: Request) -> OptionsResponse:
 async def api_match(payload: MatchRequest, request: Request) -> MatchResponse:
     profiles = _profiles(request)
     selected = match(profiles, payload)
-    return await enrich_match(selected, profiles, payload)
+    enriched = await enrich_match(selected, profiles, payload)
+    return localize_match(enriched, profiles, payload, normalize_locale(request.headers.get("accept-language")))
 
 
 @app.post("/api/agent", response_model=AgentTurnResponse)
 async def api_agent(payload: AgentTurnRequest, request: Request) -> AgentTurnResponse:
-    return await agent_turn(payload, _profiles(request), request.app.state.agent_sessions)
+    return await agent_turn(
+        payload, _profiles(request), request.app.state.agent_sessions,
+        locale=normalize_locale(request.headers.get("accept-language")),
+    )

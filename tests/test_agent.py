@@ -548,3 +548,77 @@ def test_agent_message_schema_and_http_validation():
         assert client.post("/api/agent", json={"message": "   "}).status_code == 422
         assert client.post("/api/agent", json={"message": "x" * 701}).status_code == 422
         assert client.post("/api/agent", json={"message": "Привет"}).json()["status"] == "unavailable"
+
+
+@pytest.mark.parametrize("locale, message, evidence", [
+    ("ru", "Нужен ведуший на свадьбу в Алматы, дата 2026-10-07. Бюджет до 1 000 000 ₸", {
+        "city": "Алматы", "category": "ведуший", "event_format": "свадьбу",
+        "date": "2026-10-07", "budget_kzt": "1 000 000 ₸",
+    }),
+    ("kk", "Алматыда 2026-10-07 күні өтетін үйлену тойына жүргізуші іздеймін. Бюджет 1 000 000 теңгеден аспасын", {
+        "city": "Алматыда", "category": "жүргізуші", "event_format": "үйлену тойына",
+        "date": "2026-10-07", "budget_kzt": "1 000 000 теңгеден",
+    }),
+    ("kk", "Almaty қаласында 2026-10-07 күні үйлену тойына жүргзуші керек. Бюджет ең көбі 1000000 KZT", {
+        "city": "Almaty", "category": "жүргзуші", "event_format": "үйлену тойына",
+        "date": "2026-10-07", "budget_kzt": "1000000 KZT",
+    }),
+    ("en", "Find an MC for a weddding in Almaty on 2026-10-07. My maximum budget is 1,000,000 KZT", {
+        "city": "Almaty", "category": "MC", "event_format": "weddding",
+        "date": "2026-10-07", "budget_kzt": "1,000,000 KZT",
+    }),
+    ("en", "I need an event hsot for a wedding in Алматы on 2026-10-07, up to 1000000 KZT", {
+        "city": "Алматы", "category": "event hsot", "event_format": "wedding",
+        "date": "2026-10-07", "budget_kzt": "1000000 KZT",
+    }),
+])
+def test_multilingual_typo_examples_keep_canonical_match(profiles, locale, message, evidence):
+    conditions = COMPLETE | {"budget_kzt": 1_000_000}
+    client = FakeResponses(tool(evidence=evidence, **conditions))
+    result = asyncio.run(agent_turn(
+        AgentTurnRequest(message=message), profiles, AgentSessionStore(),
+        settings=SETTINGS, client=client, locale=locale,
+    ))
+    assert result.status == "matched"
+    assert result.parameters.model_dump(exclude_none=True) == conditions
+    assert result.parameters.language is None
+    expected = direct(profiles, budget_kzt=1_000_000)
+    assert result.match.outcome == expected.outcome
+    assert result.match.total_matches == expected.total_matches
+    assert [card.id for card in result.match.cards] == [card.id for card in expected.cards]
+    assert [card.price_from_kzt for card in result.match.cards] == [card.price_from_kzt for card in expected.cards]
+    assert result.normalizations
+    assert len(client.create_calls) == len(client.parse_calls) == 1
+
+
+def test_ambiguous_slash_date_clarifies_without_changing_confirmed_date(profiles):
+    client = FakeResponses(
+        tool(evidence=COMPLETE_EVIDENCE, **COMPLETE),
+        tool(evidence={"date": "07/10"}, date="2026-10-07"),
+    )
+    sessions = AgentSessionStore()
+    first = turn(COMPLETE_MESSAGE, profiles, sessions, client)
+    second = turn("А если 07/10?", profiles, sessions, client, first.session_id)
+    assert first.status == "matched"
+    assert second.status == "clarification"
+    assert "07/10" in second.message
+    assert second.parameters.date == "2026-10-07"
+    assert second.match is None
+
+
+def test_bare_toi_stays_toi_and_does_not_become_wedding(profiles):
+    assert agent._same_catalog_value("той", "той", "event_format")
+    assert not agent._same_catalog_value("свадьба", "той", "event_format")
+    assert agent._same_catalog_value("свадьба", "үйлену тойына", "event_format")
+
+
+def test_localized_clarification_does_not_turn_ui_language_into_service_filter(profiles):
+    client = FakeResponses(tool("request_clarification", evidence={"city": "Almaty"}, city="Алматы"))
+    result = asyncio.run(agent_turn(
+        AgentTurnRequest(message="Almaty"), profiles, AgentSessionStore(),
+        settings=SETTINGS, client=client, locale="en",
+    ))
+    assert result.status == "clarification"
+    assert result.message.startswith("Which contractor category")
+    assert result.parameters.language is None
+    assert result.normalizations == [{"field": "city", "input": "Almaty", "canonical": "Алматы"}]

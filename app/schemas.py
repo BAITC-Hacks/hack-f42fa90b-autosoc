@@ -106,9 +106,24 @@ class RejectionReason(BaseModel):
 
 class Rejection(BaseModel):
     id: str
+    anon_name: str
     primary_reason: ReasonCode
     detail: str
     all_reasons: list[RejectionReason]
+
+
+class FunnelStep(BaseModel):
+    step: Literal[
+        "catalog", "city", "category", "date", "format", "budget",
+        "language", "hours", "insufficient_data",
+    ]
+    count: int = Field(ge=0)
+    applied: bool = True
+
+
+class NearbyDate(BaseModel):
+    date: date
+    total_matches: int = Field(gt=0)
 
 
 class MatchResponse(BaseModel):
@@ -119,6 +134,8 @@ class MatchResponse(BaseModel):
     rejected: list[Rejection]
     excluded_by_date: int
     message: str
+    funnel: list[FunnelStep] = Field(default_factory=list)
+    nearby_dates: list[NearbyDate] = Field(default_factory=list)
 
 
 class OptionsResponse(BaseModel):
@@ -193,3 +210,4 @@ class AgentTurnResponse(BaseModel):
     match: MatchResponse | None
     source: Literal["ai", "template", "unavailable"]
     tool_name: Literal["request_clarification", "match_contractors"] | None
+    normalizations: list[dict[str, str]] = Field(default_factory=list)
