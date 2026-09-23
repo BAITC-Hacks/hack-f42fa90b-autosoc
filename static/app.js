@@ -276,9 +276,22 @@ function renderCard(card, index) {
   for (const category of card.categories || []) categories.append(element("span", "tag", category));
   top.append(kicker, main, categories);
 
-  const explanation = element("p", "explanation");
-  explanation.append(element("span", "explanation-label", "Почему в подборке · шаблонное объяснение"),
-    document.createTextNode(card.explanation || ""));
+  const explanation = element("div", "explanation");
+  const sourceLabel = card.explanation_source === "ai_selected"
+    ? "Почему в подборке · фрагмент профиля выбран AI"
+    : "Почему в подборке · шаблонное объяснение";
+  explanation.append(
+    element("span", "explanation-label", sourceLabel),
+    element("p", "explanation-text", card.explanation || ""),
+  );
+  if (typeof card.evidence_excerpt === "string" && card.evidence_excerpt.trim()) {
+    const evidence = element("details", "evidence-disclosure");
+    evidence.append(
+      element("summary", "", "На чём основан выбор"),
+      element("p", "", `Фрагмент исходного описания: «${card.evidence_excerpt}»`),
+    );
+    explanation.append(evidence);
+  }
 
   const facts = card.facts || {};
   const factList = element("dl", "facts");
@@ -346,11 +359,14 @@ function renderOutcome(response) {
   return panel;
 }
 
-function renderRejected(rejected) {
+function renderRejected(rejected, outcome) {
   const disclosure = element("details", "rejections");
   disclosure.append(element("summary", "", `Отсеянные кандидаты · ${rejected.length}`));
   const body = element("div", "rejections-body");
-  body.append(element("p", "rejections-note", "У одного профиля может быть несколько причин. Счётчики выше учитывают только основную причину каждого профиля."));
+  const note = outcome === "all_filtered"
+    ? "У одного профиля может быть несколько причин. Счётчики выше учитывают только основную причину каждого профиля."
+    : "У одного профиля может быть несколько причин. Основная причина показана отдельно; остальные перечислены ниже.";
+  body.append(element("p", "rejections-note", note));
   for (const item of rejected) {
     const row = element("div", "rejected-item");
     row.append(element("p", "rejected-title", `Профиль № ${item.id}`),
@@ -376,7 +392,7 @@ function renderResponse(response) {
   }
   const content = [renderOutcome(response)];
   for (const [index, card] of response.cards.slice(0, 3).entries()) content.push(renderCard(card, index));
-  if (response.rejected.length) content.push(renderRejected(response.rejected));
+  if (response.rejected.length) content.push(renderRejected(response.rejected, response.outcome));
   resultsElement.replaceChildren(...content);
 }
 

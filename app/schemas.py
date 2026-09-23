@@ -90,6 +90,8 @@ class MatchCard(BaseModel):
     rank_factors: dict[str, int | float]
     facts: MatchFacts
     explanation: str
+    explanation_source: Literal["ai_selected", "template"]
+    evidence_excerpt: str | None
     description: str
     synthetic: bool
     city_imputed: bool

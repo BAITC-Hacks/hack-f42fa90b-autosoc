@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.ai_explain import enrich_match
 from app.data import load_profiles
 from app.matcher import match
 from app.schemas import CALENDAR_END, CALENDAR_START, MatchRequest, MatchResponse, OptionsResponse, Profile
@@ -53,5 +54,7 @@ def options(request: Request) -> OptionsResponse:
 
 
 @app.post("/api/match", response_model=MatchResponse)
-def api_match(payload: MatchRequest, request: Request) -> MatchResponse:
-    return match(_profiles(request), payload)
+async def api_match(payload: MatchRequest, request: Request) -> MatchResponse:
+    profiles = _profiles(request)
+    selected = match(profiles, payload)
+    return await enrich_match(selected, profiles, payload)

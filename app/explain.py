@@ -1,26 +1,78 @@
-"""Только проверенные факты и шаблонный текст; внешние модели не вызываются."""
+"""Проверка цитат и объяснения, собранные кодом из фактов профиля."""
+
+import re
+from typing import Literal
 
 from app.schemas import MatchCard, MatchFacts, MatchRequest, Profile
 
-
-def _excerpt(description: str) -> str | None:
-    text = description.strip()
-    if not text:
-        return None
-    endings = [text.find(mark) for mark in ".!?" if 0 <= text.find(mark) <= 120]
-    if endings:
-        return text[:min(endings)] or None
-    if len(text) <= 100:
-        return text
-    fragment = text[:100]
-    return fragment.rsplit(" ", 1)[0] or fragment
+MAX_EXCERPT_LENGTH = 180
+MIN_EXCERPT_LENGTH = 18
+_WORDS = re.compile(r"\w+", re.UNICODE)
+_PARTS = re.compile(r"[^.!?;•\r\n]+")
+_FEATURE_TERMS = (
+    ("импровиз", 36), ("сценар", 24), ("язык", 20),
+    ("оформлен", 18), ("флорист", 18), ("фото", 16), ("видео", 16),
+    ("вокал", 15), ("музык", 10), ("меню", 10), ("банкет", 10),
+    ("вед", 6), ("свадеб", 6),
+)
 
 
-def make_card(profile: Profile, request: MatchRequest) -> MatchCard:
+def valid_excerpt(excerpt: str | None, profile: Profile) -> bool:
+    """Цитата должна быть содержательной подстрокой именно своего description."""
+    if not isinstance(excerpt, str) or not MIN_EXCERPT_LENGTH <= len(excerpt) <= MAX_EXCERPT_LENGTH:
+        return False
+    if excerpt != excerpt.strip() or excerpt not in profile.description:
+        return False
+    if re.search(r"[.!?](?=\s+\S)", excerpt):
+        return False
+    words = _WORDS.findall(excerpt)
+    if len(words) < 3 or not any(len(word) >= 5 for word in words):
+        return False
+    folded = excerpt.casefold()
+    if folded == profile.anon_name.casefold() or "отличный выбор" in folded:
+        return False
+    if folded.startswith(("привет", "здравствуйте", "меня зовут", "добрый день")):
+        return False
+    return True
+
+
+def template_excerpt(profile: Profile) -> str | None:
+    """Детерминированно выбирает проверяемую особенность из собственного описания."""
+    choices: list[tuple[int, int, str]] = []
+    for index, match in enumerate(_PARTS.finditer(profile.description)):
+        raw = match.group().split(" Статистика:", 1)[0].strip(" \t-—:,")
+        if len(raw) > MAX_EXCERPT_LENGTH:
+            clipped = raw[:MAX_EXCERPT_LENGTH]
+            raw = clipped.rsplit(" ", 1)[0] or clipped
+        if not valid_excerpt(raw, profile):
+            continue
+        folded = raw.casefold()
+        score = sum(weight for term, weight in _FEATURE_TERMS if term in folded)
+        if "все форматы" in folded or "оборудован" in folded:
+            score -= 18
+        if any(term in folded for term in ("топ-", "лучши", "безупреч", "идеаль", "гарант", "247")):
+            score -= 18
+        score += min(len(_WORDS.findall(raw)), 12)
+        choices.append((score, -index, raw))
+    return max(choices)[2] if choices else None
+
+
+def make_card(
+    profile: Profile,
+    request: MatchRequest,
+    *,
+    evidence_excerpt: str | None = None,
+    explanation_source: Literal["ai_selected", "template"] = "template",
+) -> MatchCard:
     assert profile.price_from_kzt is not None
+    if evidence_excerpt is None:
+        evidence_excerpt = template_excerpt(profile)
+        explanation_source = "template"
+    elif not valid_excerpt(evidence_excerpt, profile):
+        raise ValueError("Цитата не подтверждена описанием профиля")
+
     headroom = request.budget_kzt - profile.price_from_kzt
     percent = round(100 * headroom / request.budget_kzt, 1)
-    excerpt = _excerpt(profile.description)
     facts = MatchFacts(
         budget_kzt=request.budget_kzt,
         price_from_kzt=profile.price_from_kzt,
@@ -32,24 +84,27 @@ def make_card(profile: Profile, request: MatchRequest) -> MatchCard:
         max_hours=profile.max_hours,
         date=request.date,
         not_marked_busy_on_date=request.date not in profile.busy_dates,
-        description_excerpt=excerpt,
+        description_excerpt=evidence_excerpt,
     )
-    additional = []
+    details = []
     if request.language:
-        additional.append(f"язык «{request.language}» указан в профиле")
+        details.append(f"язык «{request.language}» указан в профиле")
     if request.hours is not None:
         if profile.max_hours is None:
-            additional.append("работа в каталоге не привязана к часам; длительность обслуживания уточняется")
+            details.append("работа в каталоге не привязана к часам; длительность обслуживания уточняется")
         else:
-            additional.append(f"запрошено {request.hours} ч из указанного предела {profile.max_hours} ч")
-    details = "; ".join(additional)
-    if details:
-        details = "; " + details
+            details.append(f"запрошено {request.hours} ч из указанного предела {profile.max_hours} ч")
+    if evidence_excerpt:
+        details.append(f"в описании указано: «{evidence_excerpt}»")
+    else:
+        details.append("подробных сведений в описании нет")
+    extra = "; ".join(details)
+    ending = "" if evidence_excerpt and evidence_excerpt.endswith((".", "!", "?")) else "."
     explanation = (
         f"«{profile.anon_name}»: {request.category}, {request.city}, формат «{request.event_format}»; "
         f"цена от {profile.price_from_kzt} ₸ при бюджете {request.budget_kzt} ₸ "
         f"(запас {headroom} ₸, {percent}%), окончательная смета не подтверждена. "
-        f"На {request.date.isoformat()} профиль не отмечен занятым в предоставленном календаре{details}."
+        f"На {request.date.isoformat()} профиль не отмечен занятым в предоставленном календаре; {extra}{ending}"
     )
     return MatchCard(
         id=profile.id,
@@ -61,6 +116,8 @@ def make_card(profile: Profile, request: MatchRequest) -> MatchCard:
         rank_factors={"budget_headroom_kzt": headroom, "budget_headroom_percent": percent},
         facts=facts,
         explanation=explanation,
+        explanation_source=explanation_source,
+        evidence_excerpt=evidence_excerpt,
         description=profile.description,
         synthetic=profile.synthetic,
         city_imputed=profile.city_imputed,
