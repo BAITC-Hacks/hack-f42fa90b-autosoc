@@ -123,6 +123,20 @@ form { margin-top: 31px; }
 .error-message { margin: 0 0 15px; padding: 15px 17px; background: #fff2ef; border: 1px solid #ffd4ca; color: #923625; border-radius: 12px; line-height: 1.5; font-size: 13px; }
 .retry-button { margin-left: 6px; padding: 0; border: 0; background: transparent; color: inherit; text-decoration: underline; font-weight: 700; }
 .results { display: grid; gap: 14px; }
+.change-panel { padding: 19px 23px; border: 1px solid #cddcd6; border-radius: 16px; background: #f1f9f5; }
+.change-panel h3 { margin: 0 0 10px; font-size: 17px; color: #225840; }
+.change-conditions { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.65; }
+.change-total { margin: 10px 0 0; font-size: 14px; font-weight: 700; }
+.change-note { margin: 7px 0 0; color: #466153; font-size: 12px; line-height: 1.5; }
+.comparison { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: white; }
+.comparison > summary { padding: 18px 23px; color: var(--accent); font-weight: 700; font-size: 14px; cursor: pointer; }
+.comparison-scroll { max-width: 100%; overflow-x: auto; border-top: 1px solid var(--line); }
+.comparison-table { width: 100%; min-width: 570px; border-collapse: collapse; table-layout: fixed; font-size: 12px; line-height: 1.5; }
+.comparison-table caption { padding: 12px 16px; text-align: left; color: var(--muted); }
+.comparison-table th, .comparison-table td { padding: 13px 15px; vertical-align: top; text-align: left; border: 1px solid var(--line); overflow-wrap: anywhere; }
+.comparison-table th { background: #f5f6fb; font-weight: 650; }
+.comparison-table th:first-child { width: 125px; }
+.comparison-note { margin: 0; padding: 13px 20px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 .empty-state { min-height: 330px; display: grid; align-content: center; justify-items: center; padding: 35px; text-align: center; }
 .empty-symbol { width: 58px; height: 58px; display: grid; place-items: center; margin-bottom: 20px; border-radius: 18px; background: var(--accent-light); color: var(--accent); font-size: 25px; }
 .empty-state h3 { margin: 0 0 9px; font-size: 21px; letter-spacing: -.035em; }

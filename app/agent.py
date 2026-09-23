@@ -8,6 +8,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -163,7 +164,9 @@ def _first_input(session: AgentSession, message: str, catalog: dict[str, Any]) -
         "Call exactly one of the two functions. The server, never you, executes matching. "
         "Extract only values explicitly stated in the latest user message; send null for unchanged fields. "
         "For every non-null change, provide evidence as an exact short substring of latest_user_message "
-        "that states that value. Set evidence to null for unchanged fields. Never cite prior dialogue. "
+        "that states that value. Include the complete quantity with its unit for budgets or hours. "
+        "Do not extract negated alternatives (for example 'not Almaty, but Astana' means Astana). "
+        "Set evidence to null for unchanged fields. Never cite prior dialogue. "
         "Existing parameters are in current_parameters and stay unchanged unless the user changes them. "
         "Use exact canonical city, category, format and language names from the catalog. "
         "If a name is ambiguous, call request_clarification with null for that field. "
@@ -210,7 +213,29 @@ def _tool_call(response: Any) -> tuple[str, str, ToolArguments]:
 
 
 _WORDS = re.compile(r"[a-zа-яё0-9]+", re.IGNORECASE)
-_NUMBERS = re.compile(r"(?<!\w)\d(?:[\d \u00a0]*\d)?(?!\w)")
+_NUMBER_WORDS = {
+    "один": 1, "одна": 1, "одного": 1, "одной": 1,
+    "два": 2, "две": 2, "двух": 2, "три": 3, "трех": 3, "трёх": 3,
+    "четыре": 4, "пять": 5, "шесть": 6, "семь": 7, "восемь": 8, "девять": 9,
+    "десять": 10, "одиннадцать": 11, "двенадцать": 12, "тринадцать": 13,
+    "четырнадцать": 14, "пятнадцать": 15, "шестнадцать": 16,
+    "семнадцать": 17, "восемнадцать": 18, "девятнадцать": 19,
+    "двадцать": 20, "тридцать": 30, "сорок": 40, "пятьдесят": 50,
+    "шестьдесят": 60, "семьдесят": 70, "восемьдесят": 80, "девяносто": 90,
+    "сто": 100, "двести": 200, "триста": 300, "четыреста": 400,
+    "пятьсот": 500, "шестьсот": 600, "семьсот": 700, "восемьсот": 800,
+    "девятьсот": 900, "полтора": Decimal("1.5"), "полторы": Decimal("1.5"),
+}
+_WORD_NUMBER = "(?:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + ")"
+_QUANTITIES = re.compile(
+    r"(?<![\w.,])(?:(?P<number>\d+(?:[ \u00a0]\d{3})*(?:[.,]\d+)?|"
+    + _WORD_NUMBER + r"(?:\s+" + _WORD_NUMBER + r")*)\s*"
+    r"(?P<unit>тыс(?:яч[а-яё]*)?\.?|миллион[а-яё]*|млн\.?|тенге|тг|₸|час[а-яё]*|ч)?"
+    r"|(?P<implicit>полмиллиона|миллион(?:а)?))(?!\w)", re.IGNORECASE,
+)
+_BUDGET_PREFIX = re.compile(
+    r"(?:бюджет|стоимость|цена)(?:\s+(?:до|теперь|не\s+более|не\s+выше|около|максимум))*\s*[=:]?\s*$"
+)
 _MONTHS = {
     "январ": 1, "феврал": 2, "март": 3, "апрел": 4, "мая": 5, "май": 5,
     "июн": 6, "июл": 7, "август": 8, "сентябр": 9, "октябр": 10,
@@ -222,11 +247,27 @@ _ISO_DATE = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)")
 
 
 def _same_catalog_value(value: str, evidence: str) -> bool:
-    """Check significant stems, allowing ordinary Russian case endings."""
+    """Allow case endings without confusing different catalog categories."""
     words = [word for word in _WORDS.findall(value.casefold()) if word != "и"]
     cited = _WORDS.findall(evidence.casefold())
+    if value.casefold() == "ведущий" and any(word.startswith("тамад") for word in cited):
+        return True
+
+    def stem(word: str) -> str:
+        # Keep the meaningful stem: 'видеограф' must not match 'видеобудки'.
+        for ending in ("ого", "его", "ому", "ему", "ыми", "ими", "ий", "ый", "ой",
+                       "ая", "яя", "ое", "ее", "ые", "ие", "ия", "а", "я", "ы", "и", "ь"):
+            if word.endswith(ending) and len(word) - len(ending) >= 4:
+                return word[:-len(ending)]
+        return word
+
     return bool(words) and all(
-        any(part.startswith(word[:min(4, len(word))]) for part in cited)
+        any(
+            part.startswith(stem(word))
+            or (word == "день" and part in {"дня", "дню", "днем", "днём"})
+            or (word == "той" and part in {"тоя", "тою"})
+            for part in cited
+        )
         for word in words
     )
 
@@ -249,28 +290,54 @@ def _same_date(value: str, evidence: str) -> bool:
     return False
 
 
-def _same_number(value: int, evidence: str, *, budget: bool) -> bool:
-    lowered = evidence.casefold()
-    if budget:
-        if not re.search(r"бюджет|тенге|₸|\bтг\b|тыс|миллион|млн|стоимост|цен", lowered):
-            return False
-    elif not re.search(r"час|\bч\b|длительн", lowered):
-        return False
-    for match in _NUMBERS.finditer(lowered):
-        number = int(match.group().replace(" ", "").replace("\u00a0", ""))
-        suffix = lowered[match.end():].lstrip()
-        factor = 1
-        if budget and suffix.startswith(("тыс", "тысяч")):
-            factor = 1_000
-        elif budget and suffix.startswith(("миллион", "млн")):
-            factor = 1_000_000
-        if number * factor == value:
+def _same_number(
+    value: int, evidence: str, *, budget: bool, message: str | None = None,
+    allow_bare: bool = False,
+) -> bool:
+    """Validate a whole quantity, even when the model cites only part of it.
+
+    In particular, citing 'миллиона' from '2 миллиона' cannot turn it into 1M,
+    and the '5' inside '1,5 млн' cannot become 5M.
+    """
+    lowered = (message or evidence).casefold()
+    spans = [(found.start(), found.end()) for found in re.finditer(re.escape(evidence.casefold()), lowered)]
+    for quantity in _QUANTITIES.finditer(lowered):
+        if not any(start < quantity.end() and end > quantity.start() for start, end in spans):
+            continue
+        implicit = quantity.group("implicit")
+        if implicit:
+            number = 500_000 if implicit == "полмиллиона" else 1_000_000
+            if budget and number == value:
+                return True
+            continue
+        raw, unit = quantity.group("number"), quantity.group("unit") or ""
+        if raw[0].isdigit():
+            number = Decimal(raw.replace(" ", "").replace("\u00a0", "").replace(",", "."))
+        else:
+            number = sum(Decimal(_NUMBER_WORDS[word]) for word in raw.split())
+        if unit.startswith(("тыс", "миллион", "млн")):
+            if not budget:
+                continue
+            number *= 1_000 if unit.startswith("тыс") else 1_000_000
+        elif unit in {"тенге", "тг", "₸"}:
+            if not budget:
+                continue
+        elif unit.startswith("час") or unit == "ч":
+            if budget:
+                continue
+        elif not (budget and (
+            _BUDGET_PREFIX.search(lowered[:quantity.start()])
+            or (allow_bare and lowered.strip() == quantity.group().strip())
+        )):
+            continue
+        if number == value:
             return True
-    return budget and value == 1_000_000 and bool(re.search(r"\bмиллион[а-яё]*\b", lowered))
+    return False
 
 
 def _grounded_changes(
     message: str, changes: AgentParameters, evidence: ChangeEvidence,
+    current: AgentParameters | None = None,
 ) -> tuple[AgentParameters, str | None]:
     accepted: dict[str, Any] = {}
     unsupported: list[str] = []
@@ -282,7 +349,12 @@ def _grounded_changes(
         valid = (
             _same_catalog_value(value, span) if name in {"city", "category", "event_format", "language"}
             else _same_date(value, span) if name == "date"
-            else _same_number(value, span, budget=name == "budget_kzt")
+            else _same_number(
+                value, span, budget=name == "budget_kzt", message=message,
+                allow_bare=current is not None and next(
+                    (key for key in REQUIRED_FIELDS if getattr(current, key) is None), None,
+                ) == "budget_kzt",
+            )
         )
         if valid:
             accepted[name] = value
@@ -431,7 +503,9 @@ async def _run_with_client(
     )
     tool_name, call_id, arguments = _tool_call(first)
     progress.tool_name = tool_name
-    grounded, evidence_issue = _grounded_changes(payload.message, arguments.changes, arguments.evidence)
+    grounded, evidence_issue = _grounded_changes(
+        payload.message, arguments.changes, arguments.evidence, session.parameters,
+    )
     merged, catalog_issue = _merge_parameters(session.parameters, grounded, catalog)
     issue = " ".join(part for part in (evidence_issue, catalog_issue) if part) or None
     session.parameters = merged

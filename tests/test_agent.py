@@ -357,6 +357,96 @@ def test_date_numbers_do_not_become_budget_or_hours(profiles, message, changed_f
     assert result.match is None
 
 
+@pytest.mark.parametrize("amount, amount_span, budget", [
+    ("1,5 млн тенге", "1,5 млн", 1_500_000),
+    ("1.5 миллиона", "1.5 миллиона", 1_500_000),
+    ("2 миллиона", "2 миллиона", 2_000_000),
+    ("два миллиона", "два миллиона", 2_000_000),
+    ("триста пятьдесят тысяч", "триста пятьдесят тысяч", 350_000),
+    ("полмиллиона", "полмиллиона", 500_000),
+])
+def test_spoken_or_decimal_budget_is_grounded_before_matching(profiles, amount, amount_span, budget):
+    message = f"Нужен ведущий на свадьбу в Алматы 7 октября, бюджет {amount}"
+    client = FakeResponses(tool(
+        evidence=COMPLETE_EVIDENCE | {"budget_kzt": amount_span},
+        **(COMPLETE | {"budget_kzt": budget}),
+    ))
+    result = turn(message, profiles, AgentSessionStore(), client)
+    assert result.status == "matched"
+    assert result.parameters.budget_kzt == budget
+    assert_match_untouched(result.match, direct(profiles, budget_kzt=budget))
+
+
+@pytest.mark.parametrize("amount, amount_span, invented_budget", [
+    ("2 миллиона", "2 миллиона", 1_000_000),
+    ("2 миллиона", "миллиона", 1_000_000),
+    ("два миллиона", "миллиона", 1_000_000),
+    ("1,5 млн", "5 млн", 5_000_000),
+    ("1.5 млн", "5 млн", 5_000_000),
+])
+def test_partial_quote_cannot_change_numeric_magnitude(profiles, amount, amount_span, invented_budget):
+    message = f"Нужен ведущий на свадьбу в Алматы 7 октября, бюджет {amount}"
+    client = FakeResponses(tool(
+        evidence=COMPLETE_EVIDENCE | {"budget_kzt": amount_span},
+        **(COMPLETE | {"budget_kzt": invented_budget}),
+    ))
+    result = turn(message, profiles, AgentSessionStore(), client)
+    assert result.status == "clarification"
+    assert result.parameters.budget_kzt is None
+    assert result.match is None
+    assert client.parse_calls == []
+
+
+def test_number_only_reply_answers_pending_budget_question(profiles):
+    initial = {key: value for key, value in COMPLETE.items() if key != "budget_kzt"}
+    client = FakeResponses(
+        tool("request_clarification", evidence=COMPLETE_EVIDENCE, **initial),
+        tool(evidence={"budget_kzt": "300000"}, budget_kzt=300_000),
+    )
+    sessions = AgentSessionStore()
+    first = turn("Нужен ведущий на свадьбу в Алматы 7 октября", profiles, sessions, client)
+    assert first.status == "clarification"
+    assert "бюджет" in first.message.lower()
+    second = turn("300000", profiles, sessions, client, first.session_id)
+    assert second.status == "matched"
+    assert_match_untouched(second.match, direct(profiles))
+
+
+def test_broad_evidence_cannot_use_event_day_as_budget(profiles):
+    client = FakeResponses(tool(
+        evidence=COMPLETE_EVIDENCE | {"budget_kzt": COMPLETE_MESSAGE},
+        **(COMPLETE | {"budget_kzt": 7}),
+    ))
+    result = turn(COMPLETE_MESSAGE, profiles, AgentSessionStore(), client)
+    assert result.status == "clarification"
+    assert result.parameters.budget_kzt is None
+    assert result.match is None
+
+
+def test_similar_word_prefix_cannot_select_different_category():
+    catalog = (profile("booth", category="Фото и видеобудки"),)
+    client = FakeResponses(tool(
+        evidence=COMPLETE_EVIDENCE | {"category": "фотограф и видеограф"},
+        **(COMPLETE | {"category": "Фото и видеобудки"}),
+    ))
+    result = turn("Нужен фотограф и видеограф на свадьбу в Алматы 7 октября, бюджет 300000",
+                  catalog, AgentSessionStore(), client)
+    assert result.status == "clarification"
+    assert result.parameters.category is None
+    assert result.match is None
+
+
+@pytest.mark.parametrize("category_phrase", ["ведущего", "тамаду"])
+def test_ordinary_category_word_forms_keep_working(profiles, category_phrase):
+    client = FakeResponses(tool(
+        evidence=COMPLETE_EVIDENCE | {"category": category_phrase}, **COMPLETE,
+    ))
+    result = turn(f"Ищу {category_phrase} на свадьбу в Алматы 7 октября, бюджет 300000",
+                  profiles, AgentSessionStore(), client)
+    assert result.status == "matched"
+    assert_match_untouched(result.match, direct(profiles))
+
+
 @pytest.mark.parametrize("response", [
     tool("delete_database", **COMPLETE),
     SimpleNamespace(status="completed", output=[SimpleNamespace(

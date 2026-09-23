@@ -5,7 +5,7 @@ from typing import Literal
 
 from app.schemas import MatchCard, MatchFacts, MatchRequest, Profile
 
-MAX_EXCERPT_LENGTH = 180
+MAX_EXCERPT_LENGTH = 400
 MIN_EXCERPT_LENGTH = 18
 _WORDS = re.compile(r"\w+", re.UNICODE)
 _FRAGMENT_BOUNDARY = re.compile(r"(?<=[.!?])\s+|[\r\n]+|(?=•)")
@@ -101,6 +101,8 @@ def make_card(
             details.append(f"запрошено {request.hours} ч из указанного предела {profile.max_hours} ч")
     if evidence_excerpt:
         details.append(f"в описании указано: «{evidence_excerpt}»")
+    elif profile.description.strip():
+        details.append("краткий фрагмент описания не выбран; полный текст доступен в карточке")
     else:
         details.append("подробных сведений в описании нет")
     extra = "; ".join(details)

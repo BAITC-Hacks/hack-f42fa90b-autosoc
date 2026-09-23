@@ -63,6 +63,7 @@ let requestGeneration = 0;
 let agentSessionId = null;
 let agentController = null;
 let agentGeneration = 0;
+const completedResults = new WeakMap();
 
 function element(tag, className, value) {
   const item = document.createElement(tag);
@@ -236,6 +237,8 @@ async function requestMatch() {
 
   const generation = requestGeneration;
   const controller = new AbortController();
+  const payload = currentPayload();
+  const startedAt = performance.now();
   activeController = controller;
   setBusy(true);
   setStatus("Проверяем условия и занятость. Предыдущие результаты убраны.");
@@ -244,7 +247,7 @@ async function requestMatch() {
     const response = await fetch("/api/match", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(currentPayload()),
+      body: JSON.stringify(payload),
       signal: controller.signal,
     });
     const body = await response.json();
@@ -255,8 +258,8 @@ async function requestMatch() {
       return;
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    renderResponse(body);
-    setStatus("Подбор завершён.");
+    renderResponse(body, resultsElement, payload);
+    setStatus(`Подбор завершён за ${((performance.now() - startedAt) / 1000).toFixed(1)} с.`);
   } catch (error) {
     if (generation !== requestGeneration || error.name === "AbortError") return;
     setStatus("Не удалось получить результаты.");
@@ -359,7 +362,7 @@ function renderOutcome(response) {
   }
   if (meta.childNodes.length) panel.append(meta);
 
-  if (response.outcome === "all_filtered") {
+  if (response.outcome === "all_filtered" || (response.outcome === "matched" && response.total_matches < 3)) {
     const reasons = element("div", "reasons");
     for (const code of reasonOrder) {
       const count = response.primary_reason_counts?.[code] || 0;
@@ -399,15 +402,107 @@ function renderRejected(rejected, outcome) {
   return disclosure;
 }
 
-function renderResponse(response, target = resultsElement) {
+function parameterLabel(key, value) {
+  if (value === null || value === undefined || value === "") return "не задано";
+  if (key === "date") return dateLabel(value);
+  if (key === "budget_kzt") return money(value);
+  if (key === "hours") return `${value} ч`;
+  return String(value);
+}
+
+function renderChanges(previous, response, query) {
+  if (!previous || !query) return null;
+  const changes = Object.keys(fieldLabels).filter((key) =>
+    (previous.query[key] ?? null) !== (query[key] ?? null));
+  if (!changes.length) return null;
+  const panel = element("section", "change-panel");
+  panel.setAttribute("aria-label", "Что изменилось в подборе");
+  panel.append(element("h3", "", "Что изменилось?"));
+  const conditions = element("ul", "change-conditions");
+  for (const key of changes) {
+    conditions.append(element("li", "",
+      `${fieldLabels[key]}: ${parameterLabel(key, previous.query[key])} → ${parameterLabel(key, query[key])}`));
+  }
+  panel.append(conditions, element("p", "change-total",
+    `Подходящих профилей: ${previous.total} → ${response.total_matches}.`));
+  if (changes.length === 1 && changes[0] === "date") {
+    panel.append(element("p", "change-note",
+      `Остальные условия сохранены. Исключено по занятости: ${previous.excludedByDate} → ${response.excluded_by_date}.`));
+  }
+  return panel;
+}
+
+function renderComparison(cards) {
+  if (cards.length < 2) return null;
+  const disclosure = element("details", "comparison");
+  disclosure.append(element("summary", "", `Сравнить ${cards.length} варианта`));
+  const scroll = element("div", "comparison-scroll");
+  scroll.tabIndex = 0;
+  scroll.setAttribute("role", "region");
+  scroll.setAttribute("aria-label", "Таблица сравнения подрядчиков, доступна горизонтальная прокрутка");
+  const table = element("table", "comparison-table");
+  table.append(element("caption", "", "Сравнение найденных вариантов по данным каталога"));
+  const head = element("thead");
+  const heading = element("tr");
+  const label = element("th", "", "Условие");
+  label.scope = "col";
+  heading.append(label);
+  for (const card of cards) {
+    const cell = element("th", "", card.anon_name);
+    cell.scope = "col";
+    heading.append(cell);
+  }
+  head.append(heading);
+  table.append(head);
+  const body = element("tbody");
+  const rows = [
+    ["Цена от", (card) => `${money(card.price_from_kzt)}${card.price_imputed ? " · цена дополнена в данных" : ""}`],
+    ["Запас бюджета", (card) => `${money(card.facts.budget_headroom_kzt)} · ${percentFormatter.format(card.facts.budget_headroom_percent)}%`],
+    ["Особенность из описания", (card) => card.evidence_excerpt ||
+      (card.description?.trim() ? "Краткий фрагмент не выбран; смотрите исходное описание" : "Описание отсутствует")],
+    ["На выбранную дату", (card) => card.facts.not_marked_busy_on_date
+      ? `Не отмечен занятым · ${dateLabel(card.facts.date)}` : "Доступность требует уточнения"],
+    ["Происхождение", (card) => card.synthetic ? "Синтетический профиль" : "Не помечен как синтетический"],
+  ];
+  if (cards.some((card) => card.facts.language)) {
+    rows.push(["Запрошенный язык", (card) => card.facts.language || "Не задан"]);
+  }
+  if (cards.some((card) => card.facts.requested_hours != null)) {
+    rows.push(["Длительность", (card) => card.facts.max_hours == null
+      ? "Не привязана к часам; уточняется" : `Предел в профиле: ${card.facts.max_hours} ч`]);
+  }
+  for (const [title, getValue] of rows) {
+    const row = element("tr");
+    const cell = element("th", "", title);
+    cell.scope = "row";
+    row.append(cell);
+    for (const card of cards) row.append(element("td", "", getValue(card)));
+    body.append(row);
+  }
+  table.append(body);
+  scroll.append(table);
+  disclosure.append(scroll, element("p", "comparison-note",
+    "Цена «от» не является окончательной сметой. Особенности приведены из описаний профилей; запас бюджета не означает скидку."));
+  return disclosure;
+}
+
+function renderResponse(response, target = resultsElement, query = null) {
   if (!["matched", "no_category_in_city", "all_filtered"].includes(response.outcome) ||
       !Array.isArray(response.cards) || !Array.isArray(response.rejected)) {
     throw new Error("Некорректный ответ сервиса");
   }
   const content = [renderOutcome(response)];
+  const previous = completedResults.get(target);
+  const changes = renderChanges(previous, response, query);
+  if (changes) content.push(changes);
+  const comparison = renderComparison(response.cards.slice(0, 3));
+  if (comparison) content.push(comparison);
   for (const [index, card] of response.cards.slice(0, 3).entries()) content.push(renderCard(card, index));
   if (response.rejected.length) content.push(renderRejected(response.rejected, response.outcome));
   target.replaceChildren(...content);
+  if (query) completedResults.set(target, {
+    query: { ...query }, total: response.total_matches, excludedByDate: response.excluded_by_date,
+  });
 }
 
 function agentPlaceholder(message, linkToForm = false) {
@@ -476,7 +571,7 @@ function renderAgentReply(body) {
   }
   if (body.status === "matched") {
     if (!body.match) throw new Error("Нет результата подбора");
-    renderResponse(body.match, agentResults);
+    renderResponse(body.match, agentResults, body.parameters);
   } else if (body.status === "clarification") {
     agentPlaceholder("Ответьте на уточняющий вопрос, чтобы запустить подбор.");
   } else {
@@ -564,6 +659,7 @@ function resetAgent() {
   if (agentController) agentController.abort();
   agentController = null;
   agentSessionId = null;
+  completedResults.delete(agentResults);
   setAgentBusy(false);
   agentInput.value = "";
   agentInput.setCustomValidity("");

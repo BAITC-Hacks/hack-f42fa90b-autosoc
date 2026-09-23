@@ -10,7 +10,8 @@ import pytest
 from app import ai_explain
 from app.ai_explain import apply_fragment_choices, enrich_match, fragment_catalog
 from app.config import ExplanationSettings, get_settings
-from app.explain import valid_excerpt
+from app.data import load_profiles
+from app.explain import make_card, valid_excerpt
 from app.matcher import match
 from app.schemas import MatchRequest, Profile
 
@@ -247,11 +248,44 @@ def test_foreign_fragment_cannot_be_applied_to_another_profile():
 
 
 def test_long_fragment_is_omitted_instead_of_cutting_off_a_condition():
-    description = "Работает на русском языке, " + "для важных мероприятий " * 10 + "только при наличии переводчика."
+    description = "Работает на русском языке, " + "для важных мероприятий " * 20 + "только при наличии переводчика."
     candidate = profile("a", description=description)
 
     assert fragment_catalog(candidate) == []
     assert not valid_excerpt(description[:120].rstrip(), candidate)
+
+
+def test_medium_fragment_preserves_its_final_condition():
+    description = "Работает на русском языке, " + "для важных мероприятий " * 10 + "только при наличии переводчика."
+    candidate = profile("a", description=description)
+
+    assert fragment_catalog(candidate)[0]["text"] == description.rstrip(".")
+    assert not valid_excerpt(description[:120].rstrip(), candidate)
+    assert "только при наличии переводчика" in make_card(candidate, query()).explanation
+
+
+@pytest.mark.parametrize("profile_id", ["HK-42352", "HK-26808"])
+def test_real_catalog_long_paragraph_has_a_complete_own_excerpt(profile_id):
+    candidate = next(item for item in load_profiles() if item.id == profile_id)
+
+    card = make_card(candidate, query(budget_kzt=1_000_000))
+
+    assert card.evidence_excerpt == candidate.description.rstrip(".!?")
+    assert valid_excerpt(card.evidence_excerpt, candidate)
+    assert "подробных сведений в описании нет" not in card.explanation
+    assert card.evidence_excerpt in card.explanation
+
+
+def test_nonempty_unselected_description_is_not_reported_missing():
+    description = "Не проводит мероприятия без переводчика, " + "условия согласуются заранее " * 20
+    candidate = profile("a", description=description)
+
+    card = make_card(candidate, query())
+
+    assert card.evidence_excerpt is None
+    assert card.description == description
+    assert "краткий фрагмент описания не выбран" in card.explanation
+    assert "подробных сведений в описании нет" not in card.explanation
 
 
 def test_extra_id_rejects_the_batch_without_changing_response():

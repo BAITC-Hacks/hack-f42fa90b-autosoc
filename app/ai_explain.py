@@ -99,6 +99,7 @@ async def _request_quotes(
             text_format=QuoteBatch,
             max_output_tokens=500,
             store=False,
+            **({"reasoning": {"effort": "none"}} if model == "gpt-6-sol" else {}),
         ),
         timeout=AI_DEADLINE_SECONDS,
     )
