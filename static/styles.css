@@ -31,6 +31,12 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .brand-mark span:nth-child(2) { height: 20px; }
 .brand-mark span:nth-child(3) { height: 15px; }
 .header-note { color: var(--muted); font-size: 13px; }
+.header-actions { display: flex; align-items: center; gap: 21px; }
+.locale-switch { display: inline-flex; flex: none; gap: 2px; padding: 4px; border: 1px solid #d9ddec; border-radius: 12px; background: #f4f5fb; }
+.locale-button { min-width: 39px; min-height: 33px; padding: 5px 7px; border: 0; border-radius: 8px; color: #576078; background: transparent; font-size: 11px; font-weight: 800; cursor: pointer; }
+.locale-button:hover { color: var(--accent); }
+.locale-button.is-active { color: #fff; background: var(--accent); box-shadow: 0 2px 7px rgba(54, 55, 154, .17); }
+.locale-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 
 .intro { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 40px; padding: 40px 0 42px; align-items: end; }
 .eyebrow { margin: 0 0 21px; color: var(--accent); font-size: 11px; font-weight: 750; letter-spacing: .16em; display: flex; align-items: center; gap: 10px; }
@@ -44,7 +50,7 @@ h1 em { color: var(--accent); font-style: normal; }
 .intro-aside p { margin: 0 0 12px; font-size: 17px; line-height: 1.4; font-weight: 600; }
 .aside-caption { font-size: 12px; color: var(--muted); }
 
-.agent-panel { margin-bottom: 38px; padding: 28px; background: #f2f3ff; border: 1px solid #dfe1fa; border-radius: 23px; }
+.agent-panel { margin-bottom: 38px; padding: 29px; background: #f2f3ff; border: 1px solid #dfe1fa; border-radius: 23px; box-shadow: 0 14px 35px rgba(48, 48, 125, .05); }
 .agent-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 23px; }
 .agent-kicker { margin: 0 0 7px; color: var(--accent); font-size: 10px; font-weight: 750; letter-spacing: .14em; }
 .agent-heading h2 { font-size: clamp(23px, 2.4vw, 32px); }
@@ -72,8 +78,14 @@ h1 em { color: var(--accent); font-style: normal; }
 .agent-conversation .error-message { margin: 12px 0 0; }
 .agent-output-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .agent-output-heading h3 { margin: 0; font-size: 14px; }
-.agent-source { padding: 5px 8px; border-radius: 99px; background: var(--accent-light); color: var(--accent-dark); font-size: 10px; font-weight: 700; }
+.agent-source { max-width: 100%; padding: 5px 8px; border-radius: 9px; background: var(--accent-light); color: var(--accent-dark); font-size: 10px; font-weight: 700; }
+.agent-source summary { cursor: pointer; overflow-wrap: anywhere; }
+.agent-source p { max-width: 320px; margin: 8px 0 2px; color: #4d586a; font-weight: 500; line-height: 1.45; }
 .agent-parameters { min-height: 48px; margin-top: 12px; }
+.agent-normalizations { margin: 7px 0 13px; padding: 12px 14px; border-radius: 12px; border: 1px solid #d6ddec; background: #f6f8fc; font-size: 11px; line-height: 1.5; }
+.agent-normalizations strong { color: var(--accent-dark); }
+.agent-normalizations ul { margin: 6px 0 0; padding-left: 16px; }
+.agent-normalizations li { overflow-wrap: anywhere; }
 .agent-parameters > p { margin: 0; color: var(--muted); font-size: 12px; }
 .agent-parameter-list { display: flex; flex-wrap: wrap; gap: 7px; margin: 0; }
 .agent-parameter { display: inline-flex; align-items: baseline; gap: 5px; padding: 7px 9px; border-radius: 9px; background: #f3f5f8; font-size: 11px; overflow-wrap: anywhere; }
@@ -125,6 +137,20 @@ form { margin-top: 31px; }
 .results { display: grid; gap: 14px; }
 .change-panel { padding: 19px 23px; border: 1px solid #cddcd6; border-radius: 16px; background: #f1f9f5; }
 .change-panel h3 { margin: 0 0 10px; font-size: 17px; color: #225840; }
+.funnel-panel, .nearby-panel { padding: 20px 23px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
+.funnel-panel h3, .nearby-panel h3 { margin: 0 0 14px; font-size: 16px; }
+.funnel-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; margin: 0; padding: 0; list-style: none; }
+.funnel-step { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 8px; padding: 10px; border-radius: 10px; background: #f4f6fb; font-size: 11px; }
+.funnel-step strong { color: var(--accent); font-size: 15px; }
+.funnel-step small { width: 100%; color: var(--muted); font-size: 10px; }
+.funnel-summary { margin: 12px 0 0; color: var(--muted); font-size: 11px; }
+.nearby-panel > p { margin: 0 0 13px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.nearby-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.nearby-item { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 9px 10px; background: #f4f6fb; border-radius: 10px; font-size: 11px; }
+.nearby-item span { color: var(--muted); }
+.nearby-button { min-height: 32px; padding: 5px 8px; border: 1px solid var(--accent); border-radius: 8px; color: var(--accent); background: white; font-size: 11px; font-weight: 700; cursor: pointer; }
+.nearby-button:hover { background: var(--accent-light); }
+.nearby-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .change-conditions { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.65; }
 .change-total { margin: 10px 0 0; font-size: 14px; font-weight: 700; }
 .change-note { margin: 7px 0 0; color: #466153; font-size: 12px; line-height: 1.5; }
@@ -198,6 +224,7 @@ form { margin-top: 31px; }
   .form-panel { padding: 22px; }
   .demo-panel { padding: 22px 22px 12px; }
   .results-tag { display: none; }
+  .funnel-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
   .site-shell { width: min(100% - 36px, 620px); }
@@ -219,6 +246,8 @@ form { margin-top: 31px; }
 @media (max-width: 480px) {
   .site-shell { width: min(100% - 28px, 620px); }
   .header-note { display: none; }
+  .brand { font-size: 20px; }
+  .locale-button { min-width: 37px; }
   .intro { padding: 35px 0 30px; }
   h1 { font-size: 41px; }
   .agent-panel { padding: 15px; }
@@ -238,6 +267,7 @@ form { margin-top: 31px; }
   .facts { padding: 5px 20px 17px; }
   .provenance { padding: 15px 20px 19px; }
   .description-disclosure { padding: 0 20px; }
+  .funnel-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 390px) {
   .field-row { grid-template-columns: 1fr; gap: 0; }

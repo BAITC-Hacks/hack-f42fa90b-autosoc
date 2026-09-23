@@ -146,13 +146,20 @@ def _summary(response: MatchResponse, request: MatchRequest, locale: str) -> str
         return message
     if response.outcome == "no_category_in_city":
         return f"Category “{category}” is not represented in {city}; no profile was excluded by the calendar."
-    calendar = f"{date_count} profiles were excluded because they are marked busy on the selected date."
+    calendar = (
+        "1 profile was excluded because it is marked busy on the selected date."
+        if date_count == 1 else
+        f"{date_count} profiles were excluded because they are marked busy on the selected date."
+    )
     if response.outcome == "all_filtered":
         reasons = ", ".join(f"{_REASON_LABELS[locale][key]}: {value}" for key, value in response.primary_reason_counts.items() if value)
         return f"There are {len(response.rejected)} profiles in this city and category. All failed the conditions ({reasons}). {calendar}"
-    message = f"Found {count} matching profiles. {calendar}"
+    match_noun = "profile" if count == 1 else "profiles"
+    message = f"Found {count} matching {match_noun}. {calendar}"
     if count < 3:
-        message += f" Fewer than three cards: {count + len(response.rejected)} candidates total; {len(response.rejected)} failed the conditions."
+        candidates = count + len(response.rejected)
+        candidate_noun = "candidate" if candidates == 1 else "candidates"
+        message += f" Fewer than three cards: {candidates} {candidate_noun} total; {len(response.rejected)} failed the conditions."
     return message
 
 
