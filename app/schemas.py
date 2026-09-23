@@ -129,3 +129,67 @@ class OptionsResponse(BaseModel):
     languages: list[str]
     calendar_start: date
     calendar_end: date
+
+
+class AgentParameters(BaseModel):
+    """Распознанные параметры диалога; отсутствие поля означает, что его ещё не назвали."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    city: str | None = Field(default=None, max_length=80)
+    date: str | None = None
+    event_format: str | None = Field(default=None, max_length=80)
+    category: str | None = Field(default=None, max_length=80)
+    budget_kzt: int | None = Field(default=None, strict=True, gt=0)
+    language: str | None = Field(default=None, max_length=80)
+    hours: int | None = Field(default=None, strict=True, gt=0)
+
+    @field_validator("city", "event_format", "category", "language")
+    @classmethod
+    def clean_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Пустое значение параметра недопустимо")
+        return value
+
+    @field_validator("date")
+    @classmethod
+    def known_date(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if len(value) != 10 or value[4] != "-" or value[7] != "-":
+            raise ValueError("Дата должна быть в формате YYYY-MM-DD")
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("Дата должна быть в формате YYYY-MM-DD") from exc
+        if not CALENDAR_START <= parsed <= CALENDAR_END:
+            raise ValueError("Доступность вне календаря неизвестна")
+        return value
+
+
+class AgentTurnRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str | None = Field(default=None, max_length=64)
+    message: str = Field(min_length=1, max_length=700)
+
+    @field_validator("message")
+    @classmethod
+    def clean_message(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Введите сообщение")
+        return value
+
+
+class AgentTurnResponse(BaseModel):
+    session_id: str
+    status: Literal["clarification", "matched", "unavailable", "error"]
+    message: str
+    parameters: AgentParameters
+    match: MatchResponse | None
+    source: Literal["ai", "template", "unavailable"]
+    tool_name: Literal["request_clarification", "match_contractors"] | None

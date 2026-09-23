@@ -17,6 +17,17 @@ const statusElement = document.getElementById("status");
 const errorElement = document.getElementById("error");
 const resultsElement = document.getElementById("results");
 const calendarNote = document.getElementById("calendar-note");
+const agentForm = document.getElementById("agent-form");
+const agentInput = document.getElementById("agent-message");
+const agentSendButton = document.getElementById("agent-send");
+const agentSendLabel = document.getElementById("agent-send-label");
+const agentResetButton = document.getElementById("agent-reset");
+const agentHistory = document.getElementById("agent-history");
+const agentStatus = document.getElementById("agent-status");
+const agentError = document.getElementById("agent-error");
+const agentParameters = document.getElementById("agent-parameters");
+const agentResults = document.getElementById("agent-results");
+const agentSource = document.getElementById("agent-source");
 
 const scenarios = {
   choice: { city: "Алматы", date: "2026-10-07", event_format: "свадьба", category: "Ведущий", budget_kzt: 1000000 },
@@ -49,6 +60,9 @@ const percentFormatter = new Intl.NumberFormat("ru-RU", { maximumFractionDigits:
 let optionsLoaded = false;
 let activeController = null;
 let requestGeneration = 0;
+let agentSessionId = null;
+let agentController = null;
+let agentGeneration = 0;
 
 function element(tag, className, value) {
   const item = document.createElement(tag);
@@ -385,7 +399,7 @@ function renderRejected(rejected, outcome) {
   return disclosure;
 }
 
-function renderResponse(response) {
+function renderResponse(response, target = resultsElement) {
   if (!["matched", "no_category_in_city", "all_filtered"].includes(response.outcome) ||
       !Array.isArray(response.cards) || !Array.isArray(response.rejected)) {
     throw new Error("Некорректный ответ сервиса");
@@ -393,7 +407,175 @@ function renderResponse(response) {
   const content = [renderOutcome(response)];
   for (const [index, card] of response.cards.slice(0, 3).entries()) content.push(renderCard(card, index));
   if (response.rejected.length) content.push(renderRejected(response.rejected, response.outcome));
-  resultsElement.replaceChildren(...content);
+  target.replaceChildren(...content);
+}
+
+function agentPlaceholder(message, linkToForm = false) {
+  const panel = element("div", "agent-result-placeholder", message);
+  if (linkToForm) {
+    const link = element("a", "agent-form-link", "Перейти к ручной форме ↓");
+    link.href = "#form-title";
+    panel.append(" ", link);
+  }
+  agentResults.replaceChildren(panel);
+}
+
+function setAgentBusy(isBusy) {
+  agentInput.disabled = isBusy;
+  agentSendButton.disabled = isBusy;
+  agentHistory.setAttribute("aria-busy", String(isBusy));
+  agentResults.setAttribute("aria-busy", String(isBusy));
+  agentSendLabel.textContent = isBusy ? "Отправляем…" : "Отправить";
+}
+
+function appendAgentMessage(who, message) {
+  const initial = agentHistory.querySelector(".agent-empty");
+  if (initial) initial.remove();
+  const bubble = element("div", `agent-message agent-message-${who}`);
+  bubble.append(
+    element("span", "agent-speaker", who === "user" ? "Вы" : "Помощник"),
+    element("p", "", message),
+  );
+  agentHistory.append(bubble);
+  while (agentHistory.querySelectorAll(".agent-message").length > 12) {
+    agentHistory.querySelector(".agent-message").remove();
+  }
+  agentHistory.scrollTop = agentHistory.scrollHeight;
+}
+
+function renderAgentParameters(parameters) {
+  const list = element("dl", "agent-parameter-list");
+  const entries = [
+    ["city", "Город"],
+    ["category", "Категория"],
+    ["date", "Дата"],
+    ["event_format", "Формат"],
+    ["budget_kzt", "Бюджет"],
+    ["language", "Язык"],
+    ["hours", "Длительность"],
+  ];
+  for (const [key, label] of entries) {
+    const value = parameters?.[key];
+    if (value === null || value === undefined || value === "") continue;
+    let formatted = String(value);
+    if (key === "date") formatted = dateLabel(value);
+    if (key === "budget_kzt" && Number.isFinite(Number(value))) formatted = money(Number(value));
+    if (key === "hours") formatted = `${value} ч`;
+    const pair = element("div", "agent-parameter");
+    pair.append(element("dt", "", label), element("dd", "", formatted));
+    list.append(pair);
+  }
+  agentParameters.replaceChildren(list.childNodes.length ? list : element("p", "", "Параметры пока не распознаны."));
+}
+
+function renderAgentReply(body) {
+  if (!body || typeof body.session_id !== "string" ||
+      !["clarification", "matched", "unavailable", "error"].includes(body.status) ||
+      typeof body.message !== "string" || !body.parameters || typeof body.parameters !== "object") {
+    throw new Error("Некорректный ответ помощника");
+  }
+  if (body.status === "matched") {
+    if (!body.match) throw new Error("Нет результата подбора");
+    renderResponse(body.match, agentResults);
+  } else if (body.status === "clarification") {
+    agentPlaceholder("Ответьте на уточняющий вопрос, чтобы запустить подбор.");
+  } else {
+    agentPlaceholder("Помощник сейчас не может продолжить диалог. Ручной подбор доступен ниже.", true);
+  }
+  renderAgentParameters(body.parameters);
+  let sourceLabel = "Источник ответа неизвестен";
+  if (body.source === "unavailable") sourceLabel = "AI недоступен";
+  else if (body.status === "clarification") sourceLabel = "Параметры распознал AI · вопрос сформировал сервер";
+  else if (body.source === "template") sourceLabel = "Параметры распознал AI · подбор и объяснения выполнил сервер";
+  else if (body.source === "ai") sourceLabel = body.match?.cards?.length
+    ? "Параметры распознал AI · подбор выполнил сервер · фрагменты выбрал AI"
+    : "Параметры распознал AI · подбор выполнил сервер";
+  agentSource.textContent = sourceLabel;
+  agentSource.hidden = false;
+  agentSessionId = body.session_id;
+  appendAgentMessage("assistant", body.message);
+  agentStatus.textContent = body.status === "matched"
+    ? (body.match.cards.length
+      ? "Поиск выполнен сервером по распознанным условиям. Карточки показаны в порядке API."
+      : "Поиск выполнен сервером по распознанным условиям. Совпадений нет.")
+    : body.status === "clarification"
+      ? "Ожидаем уточнение. Уже распознанные условия сохранены."
+      : "Для подбора без AI используйте форму ниже.";
+}
+
+async function requestAgent() {
+  const message = agentInput.value.trim();
+  if (!message) {
+    agentInput.setCustomValidity("Введите сообщение.");
+    agentInput.reportValidity();
+    return;
+  }
+  agentError.hidden = true;
+  agentError.replaceChildren();
+  if (agentController) agentController.abort();
+  const generation = ++agentGeneration;
+  const controller = new AbortController();
+  agentController = controller;
+  setAgentBusy(true);
+  agentStatus.textContent = "Обрабатываем запрос. Прежние параметры сохранены, предыдущий результат скрыт.";
+  agentSource.hidden = true;
+  agentPlaceholder("Обрабатываем сообщение и проверяем условия…");
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch("/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ session_id: agentSessionId, message }),
+      signal: controller.signal,
+    });
+    const body = await response.json();
+    if (generation !== agentGeneration) return;
+    if (response.status === 422) {
+      agentStatus.textContent = "Сообщение отклонено проверкой данных. Прежние параметры сохранены.";
+      agentPlaceholder("После исправления сообщения попробуйте снова.");
+      agentError.textContent = "Проверьте сообщение: оно должно содержать текст длиной до 700 символов.";
+      agentError.hidden = false;
+      return;
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    appendAgentMessage("user", message);
+    renderAgentReply(body);
+    agentInput.value = "";
+    agentHistory.scrollTop = agentHistory.scrollHeight;
+  } catch (error) {
+    if (generation !== agentGeneration) return;
+    agentStatus.textContent = "Не удалось получить ответ помощника. Показаны прежние параметры.";
+    agentError.textContent = error.name === "AbortError"
+      ? "Время ожидания истекло. Повторите сообщение или воспользуйтесь формой ниже."
+      : "Связь с помощником не установлена. Повторите сообщение или воспользуйтесь формой ниже.";
+    agentError.hidden = false;
+    agentPlaceholder("Ручной подбор доступен независимо от помощника.", true);
+  } finally {
+    clearTimeout(timeout);
+    if (generation === agentGeneration) {
+      agentController = null;
+      setAgentBusy(false);
+    }
+  }
+}
+
+function resetAgent() {
+  agentGeneration += 1;
+  if (agentController) agentController.abort();
+  agentController = null;
+  agentSessionId = null;
+  setAgentBusy(false);
+  agentInput.value = "";
+  agentInput.setCustomValidity("");
+  agentHistory.replaceChildren(element("p", "agent-empty", "Опишите событие обычными словами — помощник уточнит недостающее."));
+  agentParameters.replaceChildren(element("p", "", "Параметры появятся после сообщения."));
+  agentPlaceholder("Карточки появятся здесь после поиска. Проверку условий выполняет сервер.");
+  agentSource.hidden = true;
+  agentSource.textContent = "";
+  agentError.hidden = true;
+  agentError.replaceChildren();
+  agentStatus.textContent = "Новый запрос. Контекст предыдущего диалога сброшен.";
+  agentInput.focus();
 }
 
 form.addEventListener("submit", (event) => {
@@ -415,5 +597,18 @@ for (const button of demoButtons) {
     }
   });
 }
+
+agentForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  requestAgent();
+});
+agentInput.addEventListener("input", () => agentInput.setCustomValidity(""));
+agentInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    agentForm.requestSubmit();
+  }
+});
+agentResetButton.addEventListener("click", resetAgent);
 
 loadOptions();

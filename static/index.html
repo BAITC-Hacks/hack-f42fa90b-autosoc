@@ -29,7 +29,45 @@
           <span class="aside-index">01 / 03</span>
           <div class="aside-rule" aria-hidden="true"></div>
           <p>Условия → проверка занятости → подходящие варианты</p>
-          <span class="aside-caption">Без регистрации · AI выбирает цитаты при локальной настройке</span>
+          <span class="aside-caption">Без регистрации · ручная форма работает без AI</span>
+        </div>
+      </section>
+
+      <section class="agent-panel" aria-labelledby="agent-title">
+        <div class="agent-heading">
+          <div>
+            <p class="agent-kicker">ПОДБОР В ДИАЛОГЕ</p>
+            <h2 id="agent-title">AI-помощник по подбору подрядчиков</h2>
+            <p>Опишите событие обычными словами. Помощник уточнит недостающее и покажет результат подбора по каталогу.</p>
+          </div>
+          <button type="button" class="agent-reset" id="agent-reset">Новый запрос</button>
+        </div>
+        <div class="agent-layout">
+          <div class="agent-conversation">
+            <div id="agent-history" class="agent-history" role="log" aria-live="polite" aria-label="История диалога">
+              <p class="agent-empty">Например: «Нужен ведущий в Алматы на свадьбу 7 октября 2026 года, бюджет до миллиона тенге».</p>
+            </div>
+            <form id="agent-form" class="agent-form">
+              <label for="agent-message">Ваше сообщение</label>
+              <textarea id="agent-message" name="message" rows="3" maxlength="700" required placeholder="Кого вы ищете, где, когда и с каким бюджетом?"></textarea>
+              <div class="agent-form-actions">
+                <small>Enter — отправить · Shift+Enter — новая строка</small>
+                <button type="submit" id="agent-send" class="agent-send"><span id="agent-send-label">Отправить</span><span aria-hidden="true">↗</span></button>
+              </div>
+            </form>
+            <p id="agent-status" class="agent-status" role="status" aria-live="polite">Напишите запрос или воспользуйтесь формой ниже.</p>
+            <div id="agent-error" class="error-message" role="alert" hidden></div>
+          </div>
+          <div class="agent-output">
+            <div class="agent-output-heading">
+              <h3>Распознанные параметры</h3>
+              <span id="agent-source" class="agent-source" hidden></span>
+            </div>
+            <div id="agent-parameters" class="agent-parameters"><p>Параметры появятся после сообщения.</p></div>
+            <div id="agent-results" class="agent-results results" aria-busy="false">
+              <p class="agent-result-placeholder">Карточки появятся здесь после поиска. Проверку условий выполняет сервер.</p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -135,7 +173,7 @@
     </main>
 
     <footer class="site-footer">
-      <p>Подбор основан на полях каталога. Текст объяснений собирает код; фрагмент описания выбирают AI или шаблон.</p>
+      <p>Подбор основан на полях каталога. В диалоге AI может распознать условия; карточки и порядок формирует сервер. Фрагмент описания выбирают AI или шаблон.</p>
       <p>Доступность проверяется только в пределах указанного календаря.</p>
     </footer>
   </div>

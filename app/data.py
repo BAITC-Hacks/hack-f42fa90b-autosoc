@@ -53,6 +53,13 @@ def _list(value: str) -> tuple[str, ...]:
 
 def load_csv(path: Path, provenance: str) -> list[Profile]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        opening = handle.read(2048).lstrip().lower()
+        handle.seek(0)
+        if opening.startswith(("<!doctype html", "<html", "<head", "<body")):
+            raise ValueError(
+                f"Файл {path.name} содержит HTML вместо CSV. "
+                "Проверьте скачивание исходного датасета."
+            )
         reader = csv.DictReader(handle)
         if reader.fieldnames is None or tuple(reader.fieldnames) != EXPECTED_FIELDS:
             raise ValueError(f"Неверная схема CSV: {path.name}")

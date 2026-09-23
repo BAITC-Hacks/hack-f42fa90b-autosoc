@@ -8,7 +8,7 @@ from app.schemas import MatchCard, MatchFacts, MatchRequest, Profile
 MAX_EXCERPT_LENGTH = 180
 MIN_EXCERPT_LENGTH = 18
 _WORDS = re.compile(r"\w+", re.UNICODE)
-_PARTS = re.compile(r"[^.!?;•\r\n]+")
+_FRAGMENT_BOUNDARY = re.compile(r"(?<=[.!?])\s+|[\r\n]+|(?=•)")
 _FEATURE_TERMS = (
     ("импровиз", 36), ("сценар", 24), ("язык", 20),
     ("оформлен", 18), ("флорист", 18), ("фото", 16), ("видео", 16),
@@ -17,35 +17,40 @@ _FEATURE_TERMS = (
 )
 
 
+def description_fragments(profile: Profile) -> tuple[str, ...]:
+    """Полные предложения или пункты описания, без обрезки смысла по длине.
+
+    Только эти серверные фрагменты могут попасть в карточку. Не делим по
+    запятым или точкам с запятой: там часто находятся условия и отрицания.
+    Слишком длинные части пропускаем целиком, а не обрезаем.
+    """
+    fragments: list[str] = []
+    for part in _FRAGMENT_BOUNDARY.split(profile.description):
+        fragment = part.strip().removeprefix("•").strip().rstrip(".!?").strip()
+        if not MIN_EXCERPT_LENGTH <= len(fragment) <= MAX_EXCERPT_LENGTH:
+            continue
+        words = _WORDS.findall(fragment)
+        if len(words) < 3 or not any(len(word) >= 5 for word in words):
+            continue
+        folded = fragment.casefold()
+        if folded == profile.anon_name.casefold() or "отличный выбор" in folded:
+            continue
+        if folded.startswith(("привет", "здравствуйте", "меня зовут", "добрый день")):
+            continue
+        if fragment in profile.description and fragment not in fragments:
+            fragments.append(fragment)
+    return tuple(fragments)
+
+
 def valid_excerpt(excerpt: str | None, profile: Profile) -> bool:
-    """Цитата должна быть содержательной подстрокой именно своего description."""
-    if not isinstance(excerpt, str) or not MIN_EXCERPT_LENGTH <= len(excerpt) <= MAX_EXCERPT_LENGTH:
-        return False
-    if excerpt != excerpt.strip() or excerpt not in profile.description:
-        return False
-    if re.search(r"[.!?](?=\s+\S)", excerpt):
-        return False
-    words = _WORDS.findall(excerpt)
-    if len(words) < 3 or not any(len(word) >= 5 for word in words):
-        return False
-    folded = excerpt.casefold()
-    if folded == profile.anon_name.casefold() or "отличный выбор" in folded:
-        return False
-    if folded.startswith(("привет", "здравствуйте", "меня зовут", "добрый день")):
-        return False
-    return True
+    """Цитата должна совпадать с полным фрагментом собственного описания."""
+    return isinstance(excerpt, str) and excerpt in description_fragments(profile)
 
 
 def template_excerpt(profile: Profile) -> str | None:
     """Детерминированно выбирает проверяемую особенность из собственного описания."""
     choices: list[tuple[int, int, str]] = []
-    for index, match in enumerate(_PARTS.finditer(profile.description)):
-        raw = match.group().split(" Статистика:", 1)[0].strip(" \t-—:,")
-        if len(raw) > MAX_EXCERPT_LENGTH:
-            clipped = raw[:MAX_EXCERPT_LENGTH]
-            raw = clipped.rsplit(" ", 1)[0] or clipped
-        if not valid_excerpt(raw, profile):
-            continue
+    for index, raw in enumerate(description_fragments(profile)):
         folded = raw.casefold()
         score = sum(weight for term, weight in _FEATURE_TERMS if term in folded)
         if "все форматы" in folded or "оборудован" in folded:

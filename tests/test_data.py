@@ -52,6 +52,18 @@ def test_missing_file_and_duplicate_ids(tmp_path):
         load_profiles(tmp_path)
 
 
+@pytest.mark.parametrize("html", [
+    "<!DOCTYPE html><html><body>Ошибка скачивания</body></html>",
+    "  <html><body>Sign in to Google Drive</body></html>",
+])
+def test_html_download_is_rejected_as_csv(tmp_path, html):
+    path = tmp_path / SOURCE_NAME
+    path.write_text(html, encoding="utf-8-sig")
+    with pytest.raises(ValueError, match="HTML вместо CSV"):
+        load_profiles(tmp_path)
+    assert path.read_text(encoding="utf-8-sig") == html
+
+
 @pytest.mark.parametrize("change", [
     {"synthetic": "yes"}, {"city": ""}, {"price_from_kzt": "-1"},
     {"busy_dates": "2026-10-99"},

@@ -7,15 +7,20 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.agent import AgentSessionStore, agent_turn
 from app.ai_explain import enrich_match
 from app.data import load_profiles
 from app.matcher import match
-from app.schemas import CALENDAR_END, CALENDAR_START, MatchRequest, MatchResponse, OptionsResponse, Profile
+from app.schemas import (
+    CALENDAR_END, CALENDAR_START, AgentTurnRequest, AgentTurnResponse,
+    MatchRequest, MatchResponse, OptionsResponse, Profile,
+)
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     application.state.profiles = load_profiles()
+    application.state.agent_sessions = AgentSessionStore()
     yield
 
 
@@ -58,3 +63,8 @@ async def api_match(payload: MatchRequest, request: Request) -> MatchResponse:
     profiles = _profiles(request)
     selected = match(profiles, payload)
     return await enrich_match(selected, profiles, payload)
+
+
+@app.post("/api/agent", response_model=AgentTurnResponse)
+async def api_agent(payload: AgentTurnRequest, request: Request) -> AgentTurnResponse:
+    return await agent_turn(payload, _profiles(request), request.app.state.agent_sessions)

@@ -13,7 +13,7 @@ from app.data import ROOT
 class ExplanationSettings:
     mode: str = "auto"
     api_key: str | None = field(default=None, repr=False)
-    model: str = "gpt-4o-mini"
+    model: str = "gpt-6-sol"
 
 
 def get_settings(root: Path = ROOT) -> ExplanationSettings:
@@ -31,5 +31,5 @@ def get_settings(root: Path = ROOT) -> ExplanationSettings:
     return ExplanationSettings(
         mode=mode,
         api_key=(setting("OPENAI_API_KEY") or "").strip() or None,
-        model=(setting("OPENAI_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini",
+        model=(setting("OPENAI_MODEL") or "gpt-6-sol").strip() or "gpt-6-sol",
     )
