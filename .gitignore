@@ -11,3 +11,7 @@ __pycache__/
 # Local logs
 *.log
 logs/
+
+# Local source data supplied outside Git
+/hackathon dataset anonymized.csv
+/data/hackathon dataset anonymized.csv
