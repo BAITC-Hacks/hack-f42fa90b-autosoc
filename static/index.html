@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Подбор подрядчиков — Событие</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="site-shell">
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Событие — подбор подрядчиков, главная">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>событие<span class="brand-dot">.</span></span>
+      </a>
+      <span class="header-note">Подбор по данным каталога</span>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div class="intro-copy">
+          <p class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span> ПОМОЩНИК ОРГАНИЗАТОРА</p>
+          <h1 id="page-title">Найдите тех, кто подходит <em>вашему событию.</em></h1>
+          <p class="intro-description">Укажите условия мероприятия — покажем до трёх профилей с понятными причинами выбора и проверяемыми фактами из каталога.</p>
+        </div>
+        <div class="intro-aside" aria-label="Как работает подбор">
+          <span class="aside-index">01 / 03</span>
+          <div class="aside-rule" aria-hidden="true"></div>
+          <p>Условия → проверка занятости → подходящие варианты</p>
+          <span class="aside-caption">Без регистрации и внешнего AI API</span>
+        </div>
+      </section>
+
+      <div class="workspace">
+        <aside class="form-column" aria-labelledby="form-title">
+          <section class="form-panel">
+            <div class="panel-heading">
+              <span class="section-number">01</span>
+              <div>
+                <h2 id="form-title">Параметры события</h2>
+                <p>Расскажите, кого ищете</p>
+              </div>
+            </div>
+
+            <form id="match-form" novalidate>
+              <div class="field-row">
+                <div class="field">
+                  <label for="city">Город <span aria-hidden="true">*</span></label>
+                  <select id="city" name="city" required disabled>
+                    <option value="">Загружаем города…</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="date">Дата <span aria-hidden="true">*</span></label>
+                  <input id="date" name="date" type="date" required disabled>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="category">Категория <span aria-hidden="true">*</span></label>
+                <select id="category" name="category" required disabled>
+                  <option value="">Загружаем категории…</option>
+                </select>
+                <small>Доступны категории всего каталога, включая другие города.</small>
+              </div>
+
+              <div class="field">
+                <label for="event-format">Формат мероприятия <span aria-hidden="true">*</span></label>
+                <select id="event-format" name="event_format" required disabled>
+                  <option value="">Загружаем форматы…</option>
+                </select>
+              </div>
+
+              <div class="field">
+                <label for="budget">Бюджет, ₸ <span aria-hidden="true">*</span></label>
+                <input id="budget" name="budget_kzt" type="number" inputmode="numeric" min="1" step="1" placeholder="Например, 1 000 000" required disabled>
+                <small>Цена в каталоге указана «от» и не является окончательной сметой.</small>
+              </div>
+
+              <div class="field-row optional-fields">
+                <div class="field">
+                  <label for="language">Язык <span class="optional">необязательно</span></label>
+                  <select id="language" name="language" disabled>
+                    <option value="">Любой</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="hours">Длительность, ч <span class="optional">необязательно</span></label>
+                  <input id="hours" name="hours" type="number" inputmode="numeric" min="1" step="1" placeholder="Например, 4" disabled>
+                </div>
+              </div>
+
+              <button class="submit-button" type="submit" id="submit-button" disabled>
+                <span>Подобрать подрядчиков</span><span aria-hidden="true">↗</span>
+              </button>
+              <p class="form-footnote" id="calendar-note">Загружаем границы календаря…</p>
+            </form>
+          </section>
+
+          <section class="demo-panel" aria-labelledby="demo-title">
+            <div class="demo-heading">
+              <span class="section-number">02</span>
+              <div>
+                <h2 id="demo-title">Попробуйте сценарий</h2>
+                <p>Кнопка заполнит форму и выполнит запрос</p>
+              </div>
+            </div>
+            <div class="demo-list">
+              <button type="button" class="demo-button" data-scenario="choice" disabled><span>Есть выбор</span><span aria-hidden="true">↗</span></button>
+              <button type="button" class="demo-button" data-scenario="rare" disabled><span>Редкая категория</span><span aria-hidden="true">↗</span></button>
+              <button type="button" class="demo-button" data-scenario="empty" disabled><span>Нет совпадений</span><span aria-hidden="true">↗</span></button>
+              <button type="button" class="demo-button" data-scenario="date" disabled><span>Другая дата</span><span aria-hidden="true">↗</span></button>
+            </div>
+          </section>
+        </aside>
+
+        <section class="results-column" aria-labelledby="results-title">
+          <div class="results-heading">
+            <div class="results-heading-title">
+              <span class="section-number">03</span>
+              <div>
+                <h2 id="results-title">Результаты подбора</h2>
+                <p>До трёх карточек в порядке ответа сервиса</p>
+              </div>
+            </div>
+            <span class="results-tag">ПРОВЕРЯЕМЫЕ ФАКТЫ</span>
+          </div>
+          <p id="status" class="status-message" role="status" aria-live="polite">Загружаем каталог. После этого выберите условия или демонстрационный сценарий.</p>
+          <div id="error" class="error-message" role="alert" hidden></div>
+          <div id="results" class="results" aria-busy="false"></div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <p>Подбор основан на полях каталога. Объяснения составлены по шаблону.</p>
+      <p>Доступность проверяется только в пределах указанного календаря.</p>
+    </footer>
+  </div>
+</body>
+</html>

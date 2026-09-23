@@ -7,6 +7,10 @@ from app.explain import make_card
 from app.schemas import MatchRequest, MatchResponse, Profile, Rejection, RejectionReason
 
 REASONS = ("date", "format", "budget", "language", "hours", "insufficient_data")
+REASON_LABELS = {
+    "date": "занятость на дату", "format": "формат", "budget": "бюджет",
+    "language": "язык", "hours": "длительность", "insufficient_data": "недостаток данных",
+}
 
 
 def _profile_word(number: int) -> str:
@@ -70,9 +74,10 @@ def match(profiles: Iterable[Profile], request: MatchRequest) -> MatchResponse:
     reason_counts = {reason: counts[reason] for reason in REASONS}
     matched.sort(key=lambda profile: (profile.price_from_kzt, profile.id))
     cards = [make_card(profile, request) for profile in matched[:3]]
-    calendar_note = f"По выбранной дате исключено {reason_counts['date']} профилей."
+    date_count = reason_counts["date"]
+    calendar_note = f"По выбранной дате исключено {date_count} {_profile_word(date_count)}."
     if not matched:
-        summary = ", ".join(f"{reason}: {count}" for reason, count in reason_counts.items() if count)
+        summary = ", ".join(f"{REASON_LABELS[reason]}: {count}" for reason, count in reason_counts.items() if count)
         message = f"Категория есть в городе: {len(candidates)} {_profile_word(len(candidates))}. Все отсеяны ({summary}). {calendar_note}"
         outcome = "all_filtered"
     else:

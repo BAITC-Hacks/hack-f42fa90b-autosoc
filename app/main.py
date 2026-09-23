@@ -1,8 +1,11 @@
 """HTTP API каталога подрядчиков."""
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.data import load_profiles
 from app.matcher import match
@@ -16,6 +19,13 @@ async def lifespan(application: FastAPI):
 
 
 app = FastAPI(title="Умный подбор подрядчиков", lifespan=lifespan)
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def home() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 def _profiles(request: Request) -> tuple[Profile, ...]:
